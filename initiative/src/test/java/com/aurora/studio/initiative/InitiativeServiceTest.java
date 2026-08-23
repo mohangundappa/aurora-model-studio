@@ -3,6 +3,7 @@ package com.aurora.studio.initiative;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -15,6 +16,10 @@ import com.aurora.studio.common.ValidationException;
 import com.aurora.studio.discovery.DiscoveryRun;
 import com.aurora.studio.discovery.DiscoveryService;
 import com.aurora.studio.discovery.ModelRequirement;
+import com.aurora.studio.gateway.LlmGateway;
+import com.aurora.studio.gateway.LlmOutcome;
+import com.aurora.studio.gateway.LlmResult;
+import com.aurora.studio.knowledge.KnowledgeEvidence;
 import com.aurora.studio.knowledge.KnowledgeObject;
 import com.aurora.studio.knowledge.KnowledgePackage;
 import com.aurora.studio.knowledge.KnowledgeRelationship;
@@ -25,6 +30,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
 
 class InitiativeServiceTest {
@@ -32,7 +38,9 @@ class InitiativeServiceTest {
       org.mockito.Mockito.mock(InitiativeRepository.class);
   private final DiscoveryService discovery = org.mockito.Mockito.mock(DiscoveryService.class);
   private final KnowledgeService knowledge = org.mockito.Mockito.mock(KnowledgeService.class);
-  private final InitiativeService service = new InitiativeService(repository, discovery, knowledge);
+  private final LlmGateway gateway = org.mockito.Mockito.mock(LlmGateway.class);
+  private final InitiativeService service =
+      new InitiativeService(repository, discovery, knowledge, gateway);
   private final UUID initiativeId = UUID.randomUUID();
   private final UUID attemptId = UUID.randomUUID();
 
@@ -138,9 +146,7 @@ class InitiativeServiceTest {
     assertThat(result.stages())
         .filteredOn(
             stage ->
-                stage.stage() == InitiativeStage.TARGETING_DESIGN
-                    || stage.stage() == InitiativeStage.FEATURE_DESIGN
-                    || stage.stage() == InitiativeStage.EXPERIMENT_DESIGN
+                stage.stage() == InitiativeStage.EXPERIMENT_DESIGN
                     || stage.stage() == InitiativeStage.HANDOFF)
         .allSatisfy(stage -> assertThat(stage.status()).isEqualTo(StageStatus.NOT_IMPLEMENTED));
     assertThat(
@@ -741,6 +747,403 @@ class InitiativeServiceTest {
             any());
   }
 
+  @Test
+  void nearDuplicateFeatureDraftIsReportedForReuseWithoutCreatingCandidate() {
+    KnowledgeObject asset = governedDataAsset(UUID.randomUUID(), "raw_events");
+    KnowledgeObject approvedFeature = feature(UUID.randomUUID(), "booking-intent");
+    ModelRequirement requirement = requirement(List.of(), Map.of(), "30d", "batch", "sessions");
+    InitiativeRepository.Attempt featureAttempt =
+        attempt(attemptId, InitiativeStage.FEATURE_DESIGN, StageStatus.PENDING, 1);
+    InitiativeRepository.Attempt targeting =
+        attempt(UUID.randomUUID(), InitiativeStage.TARGETING_DESIGN, StageStatus.COMPLETED, 1);
+    prepareDesign(requirement, featureAttempt, targeting, List.of(asset));
+    when(knowledge.search("FEATURE", null, null, "APPROVED", null, null, false))
+        .thenReturn(List.of(approvedFeature));
+    when(discovery.reuseScore(any(), eq(approvedFeature))).thenReturn(0.97);
+    Map<String, Object> nearDuplicate =
+        Map.of(
+            "name",
+            "booking-intent",
+            "businessDefinition",
+            "An explainable baseline combines funnel depth and recency.",
+            "entity",
+            "customer",
+            "observationWindow",
+            "30d ending strictly before as-of",
+            "pointInTimeAvailable",
+            true,
+            "sourceColumns",
+            List.of("session_id", "event_time"));
+    when(gateway.complete(any())).thenReturn(llmResult(Map.of("drafts", List.of(nearDuplicate))));
+
+    service.runStage(initiativeId, InitiativeStage.FEATURE_DESIGN);
+
+    ArgumentCaptor<List<GenerationDraft>> drafts = ArgumentCaptor.forClass(List.class);
+    verify(repository).saveDrafts(eq(attemptId), drafts.capture(), any());
+    assertThat(drafts.getValue())
+        .singleElement()
+        .satisfies(
+            draft -> {
+              assertThat(draft.outcome()).isEqualTo("REUSE");
+              assertThat(draft.validatorVerdicts())
+                  .anySatisfy(
+                      verdict ->
+                          assertThat(verdict)
+                              .isEqualTo(
+                                  new ValidatorVerdict(
+                                      "reuse-before-creation",
+                                      "REUSE",
+                                      "near-duplicate of approved feature:booking-intent")));
+            });
+    verify(knowledge, never()).createExtracted(any(), any(), any());
+    verify(knowledge, never()).addEvidence(any(), any(), any(), any(), any(), any(), anyDouble());
+  }
+
+  @Test
+  void rejectedTargetingDraftIsPersistedWithVerdictsAndNoWinnerOnlyRetry() {
+    KnowledgeObject asset = governedDataAsset(UUID.randomUUID(), "raw_events");
+    ModelRequirement requirement =
+        requirement(List.of("BOOKING_COMPLETED"), Map.of(), "30d", "batch", "sessions");
+    InitiativeRepository.Attempt targeting =
+        attempt(attemptId, InitiativeStage.TARGETING_DESIGN, StageStatus.PENDING, 1);
+    InitiativeRepository.Attempt feasibility =
+        attempt(UUID.randomUUID(), InitiativeStage.DATA_FEASIBILITY, StageStatus.COMPLETED, 1);
+    prepareDesign(requirement, targeting, feasibility, List.of(asset));
+    Map<String, Object> rejected =
+        Map.of(
+            "cohortSql",
+            "SELECT session_id, event_time FROM raw_events "
+                + "WHERE event_name = 'BOOKING_COMPLETED' AND event_time <= :as_of",
+            "labelSql",
+            "",
+            "asOfSemantics",
+            "Available at the event_time as-of point.");
+    when(gateway.complete(any())).thenReturn(llmResult(Map.of("drafts", List.of(rejected))));
+
+    service.runStage(initiativeId, InitiativeStage.TARGETING_DESIGN);
+
+    ArgumentCaptor<List<GenerationDraft>> drafts = ArgumentCaptor.forClass(List.class);
+    ArgumentCaptor<List<String>> violated = ArgumentCaptor.forClass(List.class);
+    verify(repository).saveDrafts(eq(attemptId), drafts.capture(), violated.capture());
+    assertThat(drafts.getValue()).hasSize(1);
+    assertThat(drafts.getValue().getFirst().outcome()).isEqualTo("REJECTED");
+    assertThat(drafts.getValue().getFirst().validatorVerdicts())
+        .anySatisfy(verdict -> assertThat(verdict.name()).isEqualTo("target-leakage"));
+    assertThat(violated.getValue())
+        .containsExactly(
+            "target-leakage:cohort query references target observable BOOKING_COMPLETED");
+    verify(gateway).complete(any());
+    verify(repository)
+        .finish(
+            eq(attemptId), eq(StageStatus.BLOCKED), any(), anyLong(), eq(0L), any(), any(), any());
+  }
+
+  @Test
+  void allRejectedTargetingDraftsBlockStageAndReportViolations() {
+    KnowledgeObject asset = governedDataAsset(UUID.randomUUID(), "raw_events");
+    ModelRequirement requirement =
+        requirement(List.of("BOOKING_COMPLETED"), Map.of(), "30d", "batch", "sessions");
+    InitiativeRepository.Attempt targeting =
+        attempt(attemptId, InitiativeStage.TARGETING_DESIGN, StageStatus.PENDING, 1);
+    InitiativeRepository.Attempt feasibility =
+        attempt(UUID.randomUUID(), InitiativeStage.DATA_FEASIBILITY, StageStatus.COMPLETED, 1);
+    prepareDesign(requirement, targeting, feasibility, List.of(asset));
+    Map<String, Object> rejected =
+        Map.of(
+            "cohortSql",
+            "SELECT session_id, event_time FROM raw_events "
+                + "WHERE event_name = 'BOOKING_COMPLETED' AND event_time <= :as_of",
+            "labelSql",
+            "",
+            "asOfSemantics",
+            "Available at the event_time as-of point.");
+    UUID invocationId = UUID.randomUUID();
+    when(gateway.complete(any()))
+        .thenReturn(
+            new LlmResult(
+                invocationId,
+                LlmOutcome.OK,
+                Map.of("drafts", List.of(rejected)),
+                null,
+                1,
+                1,
+                0.0,
+                1,
+                0));
+
+    service.runStage(initiativeId, InitiativeStage.TARGETING_DESIGN);
+
+    ArgumentCaptor<List<GenerationDraft>> drafts = ArgumentCaptor.forClass(List.class);
+    ArgumentCaptor<List<String>> violated = ArgumentCaptor.forClass(List.class);
+    ArgumentCaptor<List<FeasibilityCheck>> checks = ArgumentCaptor.forClass(List.class);
+    verify(gateway).complete(any());
+    verify(repository).saveDrafts(eq(attemptId), drafts.capture(), violated.capture());
+    assertThat(drafts.getValue())
+        .singleElement()
+        .satisfies(
+            draft -> {
+              assertThat(draft.outcome()).isEqualTo("REJECTED");
+              assertThat(draft.validatorVerdicts())
+                  .anySatisfy(verdict -> assertThat(verdict.name()).isEqualTo("target-leakage"));
+            });
+    assertThat(violated.getValue())
+        .containsExactly(
+            "target-leakage:cohort query references target observable BOOKING_COMPLETED");
+    verify(repository)
+        .finish(
+            eq(attemptId),
+            eq(StageStatus.BLOCKED),
+            any(),
+            anyLong(),
+            eq(0L),
+            eq(List.of("TARGETING_DESIGN_VALIDATION_FAILED")),
+            checks.capture(),
+            any());
+    assertThat(checks.getValue())
+        .anySatisfy(
+            check ->
+                assertThat(check)
+                    .extracting(FeasibilityCheck::name, FeasibilityCheck::status)
+                    .containsExactly("target-leakage", "FAIL"));
+  }
+
+  @Test
+  void providerFailureIsContainedAndInvocationIsRecorded() {
+    KnowledgeObject asset = governedDataAsset(UUID.randomUUID(), "raw_events");
+    ModelRequirement requirement =
+        requirement(List.of("BOOKING_COMPLETED"), Map.of(), "30d", "batch", "sessions");
+    InitiativeRepository.Attempt targeting =
+        attempt(attemptId, InitiativeStage.TARGETING_DESIGN, StageStatus.PENDING, 1);
+    InitiativeRepository.Attempt feasibility =
+        attempt(UUID.randomUUID(), InitiativeStage.DATA_FEASIBILITY, StageStatus.COMPLETED, 1);
+    prepareDesign(requirement, targeting, feasibility, List.of(asset));
+    UUID invocationId = UUID.randomUUID();
+    when(gateway.complete(any()))
+        .thenReturn(
+            new LlmResult(
+                invocationId,
+                LlmOutcome.FAILED,
+                Map.of(),
+                "provider secret error",
+                1,
+                0,
+                0.0,
+                1,
+                2));
+
+    service.runStage(initiativeId, InitiativeStage.TARGETING_DESIGN);
+
+    verify(repository)
+        .saveDrafts(
+            eq(attemptId),
+            eq(List.of()),
+            eq(List.of("provider-failure:Targeting design provider failed")));
+    verify(repository)
+        .finish(
+            eq(attemptId),
+            eq(StageStatus.PROVIDER_FAILED),
+            any(),
+            anyLong(),
+            eq(0L),
+            eq(List.of()),
+            eq(List.of()),
+            eq(List.of(new ArtifactReference("LLM_INVOCATION", invocationId, false))));
+    verify(repository)
+        .insertEvent(
+            eq(initiativeId),
+            eq(InitiativeStage.TARGETING_DESIGN),
+            eq(StageStatus.IN_PROGRESS),
+            eq(StageStatus.PROVIDER_FAILED),
+            eq("initiative-orchestrator"),
+            eq("Targeting design provider failed"),
+            eq(List.of(new ArtifactReference("LLM_INVOCATION", invocationId, false))));
+    verify(gateway).complete(any());
+  }
+
+  @Test
+  void targetingUnknownVerdictAwaitsHumanGateWithoutMachineDecision() {
+    KnowledgeObject asset = dataAsset(UUID.randomUUID(), "missing_columns", List.of());
+    ModelRequirement requirement = requirement(List.of(), Map.of(), "30d", "batch", "sessions");
+    InitiativeRepository.Attempt targeting =
+        attempt(attemptId, InitiativeStage.TARGETING_DESIGN, StageStatus.PENDING, 1);
+    InitiativeRepository.Attempt feasibility =
+        attempt(UUID.randomUUID(), InitiativeStage.DATA_FEASIBILITY, StageStatus.COMPLETED, 1);
+    prepareDesign(requirement, targeting, feasibility, List.of(asset));
+    Map<String, Object> draft =
+        Map.of(
+            "cohortSql",
+            "SELECT session_id, event_time FROM missing_columns WHERE event_time <= :as_of",
+            "labelSql",
+            "",
+            "asOfSemantics",
+            "Available strictly before as-of.");
+    when(gateway.complete(any())).thenReturn(llmResult(Map.of("drafts", List.of(draft))));
+
+    service.runStage(initiativeId, InitiativeStage.TARGETING_DESIGN);
+
+    ArgumentCaptor<List<FeasibilityCheck>> checks = ArgumentCaptor.forClass(List.class);
+    verify(repository)
+        .finish(
+            eq(attemptId),
+            eq(StageStatus.AWAITING_APPROVAL),
+            any(),
+            anyLong(),
+            eq(0L),
+            eq(List.of()),
+            checks.capture(),
+            any());
+    assertThat(checks.getValue())
+        .anySatisfy(
+            check ->
+                assertThat(check)
+                    .extracting(FeasibilityCheck::name, FeasibilityCheck::status)
+                    .containsExactly("governed-references", "UNKNOWN"));
+    verify(repository, never()).insertGateDecision(any(), any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void featureUnknownVerdictAwaitsHumanGateWithoutMachineDecision() {
+    KnowledgeObject asset = governedDataAsset(UUID.randomUUID(), "raw_events");
+    ModelRequirement requirement = requirement(List.of(), Map.of(), "30d", "batch", "sessions");
+    InitiativeRepository.Attempt featureAttempt =
+        attempt(attemptId, InitiativeStage.FEATURE_DESIGN, StageStatus.PENDING, 1);
+    InitiativeRepository.Attempt targeting =
+        attempt(UUID.randomUUID(), InitiativeStage.TARGETING_DESIGN, StageStatus.COMPLETED, 1);
+    prepareDesign(requirement, featureAttempt, targeting, List.of(asset));
+    when(knowledge.search("FEATURE", null, null, "APPROVED", null, null, false))
+        .thenReturn(List.of());
+    Map<String, Object> draft =
+        Map.of(
+            "name",
+            "unverified-feature",
+            "businessDefinition",
+            "Counts governed events.",
+            "entity",
+            "session",
+            "observationWindow",
+            "30d ending strictly before as-of",
+            "sourceColumns",
+            List.of("session_id", "event_time"));
+    when(gateway.complete(any())).thenReturn(llmResult(Map.of("drafts", List.of(draft))));
+    KnowledgeObject candidate = feature(UUID.randomUUID(), "unverified-feature");
+    KnowledgeEvidence evidence =
+        new KnowledgeEvidence(
+            UUID.randomUUID(),
+            candidate.clientId(),
+            candidate.id(),
+            "model-studio",
+            "generation-record",
+            "initiative://feature-design",
+            UUID.randomUUID().toString(),
+            "generated draft",
+            1.0,
+            Instant.now());
+    when(knowledge.createExtracted(any(), any(), any())).thenReturn(candidate);
+    when(knowledge.addEvidence(any(), any(), any(), any(), any(), any(), anyDouble()))
+        .thenReturn(evidence);
+
+    service.runStage(initiativeId, InitiativeStage.FEATURE_DESIGN);
+
+    ArgumentCaptor<List<FeasibilityCheck>> checks = ArgumentCaptor.forClass(List.class);
+    verify(repository)
+        .finish(
+            eq(attemptId),
+            eq(StageStatus.AWAITING_APPROVAL),
+            any(),
+            anyLong(),
+            eq(0L),
+            eq(List.of()),
+            checks.capture(),
+            any());
+    assertThat(checks.getValue())
+        .anySatisfy(
+            check ->
+                assertThat(check)
+                    .extracting(FeasibilityCheck::name, FeasibilityCheck::status)
+                    .containsExactly("point-in-time-availability", "UNKNOWN"));
+    verify(repository, never()).insertGateDecision(any(), any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void blockedTargetingPreventsFeatureDesign() {
+    InitiativeRepository.Attempt targeting =
+        attempt(attemptId, InitiativeStage.TARGETING_DESIGN, StageStatus.BLOCKED, 1);
+    InitiativeRepository.Attempt feature =
+        attempt(UUID.randomUUID(), InitiativeStage.FEATURE_DESIGN, StageStatus.PENDING, 1);
+    when(repository.find(initiativeId)).thenReturn(Optional.of(base()));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.FEATURE_DESIGN))
+        .thenReturn(Optional.of(feature));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.TARGETING_DESIGN))
+        .thenReturn(Optional.of(targeting));
+
+    assertThatThrownBy(() -> service.runStage(initiativeId, InitiativeStage.FEATURE_DESIGN))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("cannot start before TARGETING_DESIGN");
+    verifyNoGatewayCall();
+  }
+
+  @Test
+  void blockedFeasibilityPreventsBothNewDesignStages() {
+    InitiativeRepository.Attempt feasibility =
+        attempt(UUID.randomUUID(), InitiativeStage.DATA_FEASIBILITY, StageStatus.BLOCKED, 1);
+    InitiativeRepository.Attempt targeting =
+        attempt(attemptId, InitiativeStage.TARGETING_DESIGN, StageStatus.PENDING, 1);
+    InitiativeRepository.Attempt feature =
+        attempt(UUID.randomUUID(), InitiativeStage.FEATURE_DESIGN, StageStatus.PENDING, 1);
+    when(repository.find(initiativeId)).thenReturn(Optional.of(base()));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.DATA_FEASIBILITY))
+        .thenReturn(Optional.of(feasibility));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.TARGETING_DESIGN))
+        .thenReturn(Optional.of(targeting));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.FEATURE_DESIGN))
+        .thenReturn(Optional.of(feature));
+
+    assertThatThrownBy(() -> service.runStage(initiativeId, InitiativeStage.TARGETING_DESIGN))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("cannot start before DATA_FEASIBILITY");
+    assertThatThrownBy(() -> service.runStage(initiativeId, InitiativeStage.FEATURE_DESIGN))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("cannot start before TARGETING_DESIGN");
+    verifyNoGatewayCall();
+  }
+
+  private void prepareDesign(
+      ModelRequirement requirement,
+      InitiativeRepository.Attempt design,
+      InitiativeRepository.Attempt predecessor,
+      List<KnowledgeObject> assets) {
+    when(repository.find(initiativeId)).thenReturn(Optional.of(base()));
+    when(repository.latestAttempt(initiativeId, design.stage())).thenReturn(Optional.of(design));
+    when(repository.latestAttempt(initiativeId, predecessor.stage()))
+        .thenReturn(Optional.of(predecessor));
+    when(discovery.getRequirement(any())).thenReturn(requirement);
+    when(knowledge.search("DATA_ASSET", null, null, null, null, null, false)).thenReturn(assets);
+    when(repository.attempts(initiativeId)).thenReturn(allAttempts(design, predecessor));
+    when(repository.decisions(initiativeId)).thenReturn(List.of());
+    when(repository.events(initiativeId)).thenReturn(List.of());
+  }
+
+  private void verifyNoGatewayCall() {
+    verify(gateway, never()).complete(any());
+  }
+
+  private LlmResult llmResult(Map<String, Object> payload) {
+    return new LlmResult(UUID.randomUUID(), LlmOutcome.OK, payload, null, 10, 10, 0.0, 1, 0);
+  }
+
+  private KnowledgeObject governedDataAsset(UUID id, String name) {
+    return dataAsset(
+        id,
+        name,
+        List.of(),
+        Map.of(
+            "columns",
+            List.of(
+                Map.of("name", "session_id", "type", "VARCHAR(200)", "nullable", false),
+                Map.of("name", "event_time", "type", "TIMESTAMPTZ", "nullable", false),
+                Map.of("name", "event_name", "type", "VARCHAR(120)", "nullable", false))));
+  }
+
   private void prepareFeasibility(
       ModelRequirement requirement,
       InitiativeRepository.Attempt feasibility,
@@ -822,7 +1225,7 @@ class InitiativeServiceTest {
     Map<String, Object> attributes = new java.util.LinkedHashMap<>();
     attributes.put("observables", observables);
     attributes.put("grain", "one session per row");
-    attributes.put("primaryKey", "id");
+    attributes.put("primaryKey", "session_id");
     attributes.put("eventTime", "event_time");
     attributes.putAll(overrides);
     return new KnowledgeObject(
@@ -958,10 +1361,7 @@ class InitiativeServiceTest {
 
   private StageStatus defaultStatus(InitiativeStage stage) {
     if (stage == InitiativeStage.REQUIREMENT_INTAKE) return StageStatus.COMPLETED;
-    if (stage == InitiativeStage.TARGETING_DESIGN
-        || stage == InitiativeStage.FEATURE_DESIGN
-        || stage == InitiativeStage.EXPERIMENT_DESIGN
-        || stage == InitiativeStage.HANDOFF) {
+    if (stage == InitiativeStage.EXPERIMENT_DESIGN || stage == InitiativeStage.HANDOFF) {
       return StageStatus.NOT_IMPLEMENTED;
     }
     if (stage == InitiativeStage.CANDIDATE_BUILD) return StageStatus.OUT_OF_SCOPE;

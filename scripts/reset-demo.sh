@@ -100,6 +100,28 @@ if [[ "$actual_unknowns" != "$expected_unknowns" ]]; then
   echo "Reset assertion failed: reuse feasibility UNKNOWN checks were $actual_unknowns" >&2
   exit 1
 fi
+for design_stage in TARGETING_DESIGN FEATURE_DESIGN; do
+  design="$(
+    jq -c --arg stage "$design_stage" '[.stages[] | select(.stage == $stage)][0]' <<<"$reuse"
+  )"
+  if [[ "$(jq -r '.status' <<<"$design")" != "COMPLETED" ]]; then
+    echo "Reset assertion failed: reuse $design_stage did not complete" >&2
+    exit 1
+  fi
+  if [[ "$(jq -r '.attempts[-1].draftsGenerated' <<<"$design")" -lt 1 ]]; then
+    echo "Reset assertion failed: reuse $design_stage generated no drafts" >&2
+    exit 1
+  fi
+done
+target_attempt="$(
+  jq -c '[.stages[] | select(.stage == "TARGETING_DESIGN")][0].attempts[-1]' <<<"$reuse"
+)"
+if [[ "$(jq -r '.draftsRejected' <<<"$target_attempt")" -lt 1 ]] \
+    || ! jq -e '[.drafts[].validatorVerdicts[] | select(.name == "target-leakage" and .status == "FAIL")] | length > 0' \
+      <<<"$target_attempt" >/dev/null; then
+  echo "Reset assertion failed: targeting rejected draft did not record leakage" >&2
+  exit 1
+fi
 
 cancellation="$(
   jq -c '[.[] | select(((.requirement.requiredObservables // []) | index("BOOKING_CANCELLED")) != null)][0]' \

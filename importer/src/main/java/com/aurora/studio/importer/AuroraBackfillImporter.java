@@ -233,30 +233,104 @@ public class AuroraBackfillImporter {
             "experiment_outcomes",
                 "one measured outcome joined to an exposure; event_time is outcome time");
     Path migration = root.resolve("app/src/main/resources/db/migration/V1__initial_schema.sql");
+    String ddl = Files.readString(migration);
+    Map<String, Object> columns = governedColumns(ddl, "raw_events");
     for (var entry : definitions.entrySet()) {
-      createIfChanged(
-          "data-asset:" + entry.getKey(),
-          KnowledgeType.DATA_ASSET,
-          entry.getKey(),
-          "customer intelligence",
-          "analytics data foundation",
-          entry.getValue(),
-          Map.of(
-              "grain",
-              entry.getValue().split(";")[0],
-              "primaryKey",
-              "repository-defined row identifier",
-              "eventTime",
-              "event_time",
-              "history",
-              "retained in PostgreSQL tables",
-              "observables",
-              List.of("BOOKING_COMPLETED", "PROPERTY_VIEWED", "BOOKING_STARTED")),
-          migration,
-          hash(migration) + ":" + entry.getKey(),
-          root,
-          counts);
+      Map<String, Object> attributes =
+          new LinkedHashMap<>(
+              Map.of(
+                  "grain",
+                  entry.getValue().split(";")[0],
+                  "primaryKey",
+                  "repository-defined row identifier",
+                  "eventTime",
+                  "event_time",
+                  "history",
+                  "retained in PostgreSQL tables",
+                  "observables",
+                  List.of("BOOKING_COMPLETED", "PROPERTY_VIEWED", "BOOKING_STARTED")));
+      if (entry.getKey().equals("raw_events")) {
+        attributes.put("columns", columns.getOrDefault("columns", List.of()));
+        attributes.put(
+            "primaryKey", columns.getOrDefault("primaryKey", "repository-defined row identifier"));
+        attributes.put("eventTime", columns.getOrDefault("eventTime", "event_time"));
+      }
+      KnowledgeObject object =
+          createIfChanged(
+              "data-asset:" + entry.getKey(),
+              KnowledgeType.DATA_ASSET,
+              entry.getKey(),
+              "customer intelligence",
+              "analytics data foundation",
+              entry.getValue(),
+              attributes,
+              migration,
+              hash(migration) + ":" + entry.getKey(),
+              root,
+              counts);
+      if (object != null && entry.getKey().equals("raw_events")) {
+        service.getSourceEvidence(object.id(), true).stream()
+            .findFirst()
+            .ifPresent(
+                evidence ->
+                    service.addFieldProvenance(
+                        object.id(),
+                        "columns",
+                        columns.getOrDefault("columns", List.of()),
+                        "EVIDENCE_BACKED",
+                        evidence.id(),
+                        evidence.excerpt(),
+                        1.0));
+      }
     }
+  }
+
+  private Map<String, Object> governedColumns(String ddl, String table) {
+    Matcher tableMatcher =
+        Pattern.compile(
+                "(?is)create\\s+table\\s+(?:if\\s+not\\s+exists\\s+)?"
+                    + Pattern.quote(table)
+                    + "\\s*\\(")
+            .matcher(ddl);
+    if (!tableMatcher.find()) return Map.of("columns", List.of());
+    int start = tableMatcher.end();
+    int depth = 1;
+    int end = start;
+    while (end < ddl.length() && depth > 0) {
+      char current = ddl.charAt(end++);
+      if (current == '(') depth++;
+      if (current == ')') depth--;
+    }
+    if (depth != 0) return Map.of("columns", List.of());
+    String definitionBody = ddl.substring(start, end - 1);
+    List<Map<String, Object>> columns = new java.util.ArrayList<>();
+    String primaryKey = null;
+    for (String definition : definitionBody.split(",\\s*(?=[a-zA-Z_])")) {
+      String trimmed = definition.trim();
+      Matcher column =
+          Pattern.compile(
+                  "(?is)^([a-zA-Z_][a-zA-Z0-9_]*)\\s+([a-zA-Z]+(?:\\s*\\([^)]*\\))?(?:\\s+with\\s+time\\s+zone)?)\\s+(.*)$")
+              .matcher(trimmed);
+      if (!column.find()) continue;
+      String name = column.group(1);
+      String type = column.group(2).trim().replaceAll("\\s+", " ").toUpperCase();
+      String constraints = column.group(3).toUpperCase();
+      boolean primary = constraints.contains("PRIMARY KEY");
+      boolean nullable = !constraints.contains("NOT NULL") && !primary;
+      if (primary) primaryKey = name;
+      columns.add(Map.of("name", name, "type", type, "nullable", nullable));
+    }
+    String eventTime =
+        columns.stream()
+            .map(column -> String.valueOf(column.get("name")))
+            .filter(name -> name.equalsIgnoreCase("event_time"))
+            .findFirst()
+            .orElse(null);
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("columns", columns);
+    if (primaryKey != null) result.put("primaryKey", primaryKey);
+    if (eventTime != null) result.put("eventTime", eventTime);
+    return result;
   }
 
   private void importPolicy(Path root, Map<String, Integer> counts) throws IOException {
