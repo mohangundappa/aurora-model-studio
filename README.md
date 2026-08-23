@@ -1,18 +1,44 @@
 # Aurora Model Studio
 
-Aurora Model Studio is the governed enterprise-knowledge foundation for accelerating
-model development from a requirement to an approved candidate model. Phase 1 records
-versioned models, features, data assets, implementations, experiments, standards,
-evidence, relationships, conflicts, confidence, and lifecycle decisions.
+Aurora Model Studio is a governed, provider-neutral development workspace for
+turning a marketing requirement into an evidence-backed and human-approved
+model design package. It imports a real Aurora Intelligence checkout in place,
+maintains versioned knowledge with provenance, discovers and reuses existing
+features and implementations, and records conflicts, confidence, lifecycle
+decisions, and tenant-scoped audit history.
 
-It is not a live AI gateway, an LLM product, a vector or graph search system, a
-production model-serving system, or a replacement for client MLOps. Phase 1 contains
-no AI at all. Production deployment, monitoring, feature serving, and operational
-ownership remain client MLOps responsibilities.
+The current loop is live:
 
-Aurora Intelligence remains the runtime that turns signals into decisions and measured
-value. Model Studio and Aurora Intelligence meet through a future HTTP handoff contract;
-the handoff is documented but not implemented in phase 1. Aurora Hotels is fictional.
+```text
+requirement
+  → knowledge backfill and grounded extraction
+  → retrieval and scorecard-based discovery/reuse
+  → deterministic data-feasibility checks
+  → targeting and feature design
+  → bounded experiment design
+  → named human approval
+  → content-hashed handoff to Aurora Intelligence
+```
+
+The provider-neutral LLM gateway supports a deterministic adapter by default,
+which is suitable for offline demos and CI. OpenAI is opt-in through
+`studio.llm.provider=openai` and `OPENAI_API_KEY`; provider calls, prompts,
+schemas, outcomes, and costs are recorded in append-only invocation history.
+Model-assisted descriptions and proposals remain evidence-grounded candidates:
+validators and human gates, not the model, decide what is trusted.
+
+The handoff creates an immutable design package for Aurora Intelligence. It is
+not model training and does not claim weights, evaluation, expected lift, or a
+causal result. `CANDIDATE_BUILD` is permanently out of scope. Aurora receives
+the package as a candidate awaiting client-trained weights; client MLOps owns
+training, evaluation, deployment, serving, monitoring, and rollback of any
+real model version. Governance actors in this local showcase are
+self-declared and unverified. Aurora Hotels is fictional.
+
+Aurora Intelligence is the separate runtime that turns events into signals,
+context, decisions, experiments, and measured value. The two products meet
+through the live HTTP handoff described in the
+[Aurora Hotels capability guide](https://github.com/mohangundappa/aurora-intelligence/blob/main/docs/capability-guide.md).
 
 ## Run locally
 
@@ -38,9 +64,9 @@ scripts/reset-demo.sh
 
 The reset removes and recreates the Compose database volume, then runs the importer,
 structural extraction, synthetic extraction, curated demo approval, curated approvals,
-embedding backfill, and initiative seeding. Initiatives are created through the same API service path used
-by `POST /api/initiatives`; the script never inserts initiative rows directly. Set
-`AURORA_REPO` to use a different Aurora Intelligence checkout.
+embedding backfill, and initiative seeding. Initiatives are created through the same
+API service path used by `POST /api/initiatives`; the script never inserts initiative
+rows directly. Set `AURORA_REPO` to use a different Aurora Intelligence checkout.
 
 To backfill the real Aurora Intelligence checkout:
 
