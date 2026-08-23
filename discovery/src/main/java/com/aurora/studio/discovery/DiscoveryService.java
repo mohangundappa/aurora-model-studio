@@ -1,5 +1,7 @@
 package com.aurora.studio.discovery;
 
+import com.aurora.studio.common.ResourceNotFoundException;
+import com.aurora.studio.common.ValidationException;
 import com.aurora.studio.gateway.LlmGateway;
 import com.aurora.studio.gateway.LlmOutcome;
 import com.aurora.studio.gateway.LlmRequest;
@@ -97,7 +99,7 @@ public class DiscoveryService {
   public ModelRequirement getRequirement(UUID requirementId) {
     return repository
         .findRequirement(requirementId)
-        .orElseThrow(() -> new IllegalArgumentException("Discovery requirement was not found"));
+        .orElseThrow(() -> new ResourceNotFoundException("Discovery requirement was not found"));
   }
 
   public Optional<UUID> findRequirementByUseCase(String businessUseCase) {
@@ -109,7 +111,8 @@ public class DiscoveryService {
     ModelRequirement requirement =
         repository
             .findRequirement(requirementId)
-            .orElseThrow(() -> new IllegalArgumentException("Discovery requirement was not found"));
+            .orElseThrow(
+                () -> new ResourceNotFoundException("Discovery requirement was not found"));
     List<KnowledgeObject> visible =
         knowledge.search(null, null, null, null, null, null, includeCandidates);
     Embedding requestEmbedding = embeddings.embed(requirementText(requirement));
@@ -171,7 +174,7 @@ public class DiscoveryService {
     Map<String, Object> result =
         repository
             .findRun(id)
-            .orElseThrow(() -> new IllegalArgumentException("Discovery run was not found"));
+            .orElseThrow(() -> new ResourceNotFoundException("Discovery run was not found"));
     return mapper.convertValue(result, DiscoveryRun.class);
   }
 
@@ -639,7 +642,7 @@ public class DiscoveryService {
         || blank(requirement.population())
         || blank(requirement.outcomeHorizon())
         || blank(requirement.decisionLatency())) {
-      throw new IllegalArgumentException("Discovery requirement is incomplete");
+      throw new ValidationException("Discovery requirement is incomplete");
     }
   }
 

@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import com.aurora.studio.common.KnowledgeType;
 import com.aurora.studio.common.RelationshipType;
+import com.aurora.studio.common.ValidationException;
 import com.aurora.studio.discovery.DiscoveryRun;
 import com.aurora.studio.discovery.DiscoveryService;
 import com.aurora.studio.discovery.ModelRequirement;
@@ -24,6 +25,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DuplicateKeyException;
 
 class InitiativeServiceTest {
   private final InitiativeRepository repository =
@@ -206,6 +208,65 @@ class InitiativeServiceTest {
 
     verify(repository)
         .insertAttempt(initiativeId, InitiativeStage.KNOWLEDGE_DISCOVERY, 2, StageStatus.PENDING);
+  }
+
+  @Test
+  void concurrentRerunSurfacesConflictWithoutStartingLoser() {
+    InitiativeRepository.Base base = base();
+    InitiativeRepository.Attempt prior =
+        attempt(UUID.randomUUID(), InitiativeStage.KNOWLEDGE_DISCOVERY, StageStatus.BLOCKED, 1);
+    InitiativeRepository.Attempt intake =
+        attempt(UUID.randomUUID(), InitiativeStage.REQUIREMENT_INTAKE, StageStatus.COMPLETED, 1);
+    when(repository.find(initiativeId)).thenReturn(Optional.of(base));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.KNOWLEDGE_DISCOVERY))
+        .thenReturn(Optional.of(prior));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.REQUIREMENT_INTAKE))
+        .thenReturn(Optional.of(intake));
+    when(repository.insertAttempt(
+            initiativeId, InitiativeStage.KNOWLEDGE_DISCOVERY, 2, StageStatus.PENDING))
+        .thenThrow(new DuplicateKeyException("duplicate stage attempt"));
+
+    assertThatThrownBy(() -> service.runStage(initiativeId, InitiativeStage.KNOWLEDGE_DISCOVERY))
+        .isInstanceOf(StageAlreadyRunningException.class)
+        .hasMessage("Stage is already running or awaiting approval");
+    verify(repository, never()).start(any(), any());
+  }
+
+  @Test
+  void hostileGateTextIsRejectedBeforeInsert() {
+    InitiativeRepository.Attempt awaiting =
+        new InitiativeRepository.Attempt(
+            attemptId,
+            InitiativeStage.REUSE_DECISION,
+            1,
+            StageStatus.AWAITING_APPROVAL,
+            Instant.now().minusSeconds(2),
+            Instant.now().minusSeconds(1),
+            7,
+            0,
+            List.of(),
+            List.of(),
+            List.of());
+    when(repository.find(initiativeId)).thenReturn(Optional.of(base()));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.REUSE_DECISION))
+        .thenReturn(Optional.of(awaiting));
+    assertThatThrownBy(
+            () ->
+                service.decide(
+                    initiativeId,
+                    InitiativeStage.REUSE_DECISION,
+                    new GateDecisionRequest("APPROVE", "x".repeat(201), null)))
+        .isInstanceOf(ValidationException.class)
+        .hasMessageContaining("actor");
+    assertThatThrownBy(
+            () ->
+                service.decide(
+                    initiativeId,
+                    InitiativeStage.REUSE_DECISION,
+                    new GateDecisionRequest("APPROVE", "reviewer\u0000", null)))
+        .isInstanceOf(ValidationException.class)
+        .hasMessageContaining("actor");
+    verify(repository, never()).insertGateDecision(any(), any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -615,6 +676,71 @@ class InitiativeServiceTest {
             any());
   }
 
+  @Test
+  void requiredGovernedKnowledgeConflictBlocksRegardlessOfType() {
+    KnowledgeObject implementation =
+        knowledgeObject(
+            UUID.randomUUID(),
+            KnowledgeType.IMPLEMENTATION,
+            "implementation:legacy/implementations/loyalty-tenure.java",
+            "loyalty-tenure-implementation");
+    KnowledgeObject specification =
+        knowledgeObject(
+            UUID.randomUUID(),
+            KnowledgeType.STANDARD,
+            "standard:loyalty-tenure-spec",
+            "loyalty-tenure-spec");
+    KnowledgeRelationship governed =
+        new KnowledgeRelationship(
+            UUID.randomUUID(),
+            implementation.clientId(),
+            implementation.id(),
+            RelationshipType.GOVERNED_BY,
+            specification.id(),
+            null);
+    com.aurora.studio.knowledge.KnowledgeConflict conflict =
+        new com.aurora.studio.knowledge.KnowledgeConflict(
+            UUID.randomUUID(),
+            implementation.clientId(),
+            implementation.id(),
+            "measurementUnit",
+            "BLOCKING",
+            Map.of("current", "months", "other", "years"),
+            com.aurora.studio.common.KnowledgeConflictStatus.OPEN,
+            null);
+    ModelRequirement requirement =
+        requirement(
+            List.of(),
+            Map.of(
+                "requiredKnowledgeKeys",
+                List.of("implementation:legacy/implementations/loyalty-tenure.java")),
+            "14d",
+            "batch",
+            "sessions");
+    InitiativeRepository.Attempt feasibility =
+        attempt(attemptId, InitiativeStage.DATA_FEASIBILITY, StageStatus.PENDING, 1);
+    InitiativeRepository.Attempt reuse =
+        attempt(UUID.randomUUID(), InitiativeStage.REUSE_DECISION, StageStatus.COMPLETED, 1);
+    prepareFeasibility(requirement, feasibility, reuse, List.of(implementation, specification));
+    when(knowledge.get(implementation.id(), false))
+        .thenReturn(packageFor(implementation, List.of(governed), List.of()));
+    when(knowledge.get(specification.id(), false))
+        .thenReturn(packageFor(specification, List.of(governed), List.of(conflict)));
+
+    service.runStage(initiativeId, InitiativeStage.DATA_FEASIBILITY);
+
+    verify(repository)
+        .finish(
+            eq(attemptId),
+            eq(StageStatus.BLOCKED),
+            any(),
+            anyLong(),
+            eq(0L),
+            eq(List.of("OPEN_CONFLICT:implementation:legacy/implementations/loyalty-tenure.java")),
+            any(),
+            any());
+  }
+
   private void prepareFeasibility(
       ModelRequirement requirement,
       InitiativeRepository.Attempt feasibility,
@@ -659,12 +785,16 @@ class InitiativeServiceTest {
   }
 
   private KnowledgeObject feature(UUID id, String name) {
+    return knowledgeObject(id, KnowledgeType.FEATURE, "feature:" + name, name);
+  }
+
+  private KnowledgeObject knowledgeObject(UUID id, KnowledgeType type, String key, String name) {
     return new KnowledgeObject(
         id,
         UUID.randomUUID(),
-        "feature:" + name,
+        key,
         1,
-        KnowledgeType.FEATURE,
+        type,
         name,
         "domain",
         "use-case",
@@ -767,10 +897,17 @@ class InitiativeServiceTest {
 
   private KnowledgePackage packageFor(
       KnowledgeObject object, List<KnowledgeRelationship> relationships) {
+    return packageFor(object, relationships, List.of());
+  }
+
+  private KnowledgePackage packageFor(
+      KnowledgeObject object,
+      List<KnowledgeRelationship> relationships,
+      List<com.aurora.studio.knowledge.KnowledgeConflict> conflicts) {
     return new KnowledgePackage(
         object.id(),
         1,
-        "DATA_ASSET",
+        object.knowledgeType().name(),
         object.name(),
         object.businessDescription(),
         object.attributes(),
@@ -787,7 +924,7 @@ class InitiativeServiceTest {
         true,
         false,
         List.of(),
-        List.of(),
+        conflicts,
         null);
   }
 

@@ -26,6 +26,21 @@ docker compose up --build -d
 The PostgreSQL and application ports are `5433` and `8081`. Every API request needs
 `X-Aurora-Client`; the local demo clients are UUIDs ending in `...0001` and `...0002`.
 Actors are self-declared local-demo values, not authenticated identities.
+The database gate trigger is defense in depth against accidental machine writes:
+because the API marker is a session setting, a database-capable actor could forge
+that marker. Gate rows still force `actor_verified` to remain false.
+
+To recreate the showcase corpus and seed both initiatives from a clean database:
+
+```bash
+scripts/reset-demo.sh
+```
+
+The reset removes and recreates the Compose database volume, then runs the importer,
+structural extraction, synthetic extraction, curated demo approval, curated approvals,
+embedding backfill, and initiative seeding. Initiatives are created through the same API service path used
+by `POST /api/initiatives`; the script never inserts initiative rows directly. Set
+`AURORA_REPO` to use a different Aurora Intelligence checkout.
 
 To backfill the real Aurora Intelligence checkout:
 

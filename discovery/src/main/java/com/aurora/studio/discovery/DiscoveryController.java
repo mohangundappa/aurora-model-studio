@@ -1,5 +1,7 @@
 package com.aurora.studio.discovery;
 
+import com.aurora.studio.common.ResourceNotFoundException;
+import com.aurora.studio.common.ValidationException;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -43,7 +45,17 @@ public class DiscoveryController {
 
   public record RunRequest(UUID requirementId, boolean includeCandidates) {}
 
-  @ExceptionHandler({IllegalArgumentException.class, IllegalStateException.class})
+  @ExceptionHandler(ResourceNotFoundException.class)
+  @ResponseStatus(HttpStatus.NOT_FOUND)
+  public java.util.Map<String, String> notFound(ResourceNotFoundException exception) {
+    return java.util.Map.of("error", exception.getMessage());
+  }
+
+  @ExceptionHandler({
+    ValidationException.class,
+    IllegalArgumentException.class,
+    IllegalStateException.class
+  })
   @ResponseStatus(HttpStatus.BAD_REQUEST)
   public java.util.Map<String, String> error(RuntimeException exception) {
     return java.util.Map.of("error", exception.getMessage());

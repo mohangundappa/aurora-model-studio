@@ -1,10 +1,13 @@
 package com.aurora.studio.initiative;
 
 import com.aurora.studio.common.RelationshipType;
+import com.aurora.studio.common.ResourceNotFoundException;
+import com.aurora.studio.common.ValidationException;
 import com.aurora.studio.discovery.DiscoveryCandidate;
 import com.aurora.studio.discovery.DiscoveryRun;
 import com.aurora.studio.discovery.DiscoveryService;
 import com.aurora.studio.discovery.ModelRequirement;
+import com.aurora.studio.knowledge.KnowledgeConflict;
 import com.aurora.studio.knowledge.KnowledgeObject;
 import com.aurora.studio.knowledge.KnowledgePackage;
 import com.aurora.studio.knowledge.KnowledgeRelationship;
@@ -21,6 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,12 +53,12 @@ public class InitiativeService {
   @Transactional
   public Initiative create(CreateInitiativeRequest request) {
     if (request == null || request.requirementId() == null) {
-      throw new IllegalArgumentException("requirementId is required");
+      throw new ValidationException("requirementId is required");
     }
     discovery.getRequirement(request.requirementId());
     if (request.clientBaselineDurationMillis() != null
         && request.clientBaselineDurationMillis() < 0) {
-      throw new IllegalArgumentException("clientBaselineDurationMillis must not be negative");
+      throw new ValidationException("clientBaselineDurationMillis must not be negative");
     }
     UUID id =
         repository.create(
@@ -74,7 +78,7 @@ public class InitiativeService {
     InitiativeRepository.Base base =
         repository
             .find(id)
-            .orElseThrow(() -> new IllegalArgumentException("Initiative was not found"));
+            .orElseThrow(() -> new ResourceNotFoundException("Initiative was not found"));
     return assemble(base, repository.attempts(id));
   }
 
@@ -163,7 +167,7 @@ public class InitiativeService {
   public Initiative runStage(UUID initiativeId, InitiativeStage stage) {
     InitiativeRepository.Base base = require(initiativeId);
     if (repository.latestAttempt(initiativeId, stage).isEmpty()) {
-      throw new IllegalArgumentException("Unknown initiative stage");
+      throw new ResourceNotFoundException("Unknown initiative stage");
     }
     InitiativeRepository.Attempt current = latest(initiativeId, stage);
     if (current.status() == StageStatus.NOT_IMPLEMENTED
@@ -184,7 +188,12 @@ public class InitiativeService {
     }
     if (current.status() != StageStatus.PENDING) {
       int attempt = current.attempt() + 1;
-      UUID attemptId = repository.insertAttempt(initiativeId, stage, attempt, StageStatus.PENDING);
+      UUID attemptId;
+      try {
+        attemptId = repository.insertAttempt(initiativeId, stage, attempt, StageStatus.PENDING);
+      } catch (DuplicateKeyException exception) {
+        throw new StageAlreadyRunningException();
+      }
       current =
           new InitiativeRepository.Attempt(
               attemptId,
@@ -244,18 +253,20 @@ public class InitiativeService {
   @Transactional
   public Initiative decide(UUID initiativeId, InitiativeStage stage, GateDecisionRequest request) {
     if (!GATED_STAGES.contains(stage)) {
-      throw new IllegalArgumentException("Stage does not have a human gate");
+      throw new ValidationException("Stage does not have a human gate");
     }
     if (request == null || request.actor() == null || request.actor().isBlank()) {
-      throw new IllegalArgumentException("actor is required");
+      throw new ValidationException("actor is required");
     }
+    validateGateText("actor", request.actor());
+    if (request.reason() != null) validateGateText("reason", request.reason());
     String decision = request.decision() == null ? "" : request.decision().trim().toUpperCase();
     if (!Set.of("APPROVE", "REJECT", "RETURN").contains(decision)) {
-      throw new IllegalArgumentException("decision must be APPROVE, REJECT, or RETURN");
+      throw new ValidationException("decision must be APPROVE, REJECT, or RETURN");
     }
     if ((decision.equals("REJECT") || decision.equals("RETURN"))
         && (request.reason() == null || request.reason().isBlank())) {
-      throw new IllegalArgumentException("reason is required for reject and return");
+      throw new ValidationException("reason is required for reject and return");
     }
     require(initiativeId);
     InitiativeRepository.Attempt current = latest(initiativeId, stage);
@@ -268,6 +279,11 @@ public class InitiativeService {
             .map(FeasibilityCheck::name)
             .distinct()
             .toList();
+    if (request.acceptedUnknownChecks() != null) {
+      request
+          .acceptedUnknownChecks()
+          .forEach(check -> validateGateText("acceptedUnknownChecks", check));
+    }
     List<String> acceptedUnknownChecks =
         request.acceptedUnknownChecks() == null
             ? List.of()
@@ -275,16 +291,16 @@ public class InitiativeService {
     if (stage == InitiativeStage.DATA_FEASIBILITY && !unknownChecks.isEmpty()) {
       List<String> expectedUnknownChecks = unknownChecks.stream().sorted().toList();
       if (decision.equals("APPROVE") && !acceptedUnknownChecks.equals(expectedUnknownChecks)) {
-        throw new IllegalArgumentException(
+        throw new ValidationException(
             "acceptedUnknownChecks must name every UNKNOWN feasibility check: "
                 + String.join(", ", expectedUnknownChecks));
       }
       if (!decision.equals("APPROVE") && !acceptedUnknownChecks.isEmpty()) {
-        throw new IllegalArgumentException(
+        throw new ValidationException(
             "acceptedUnknownChecks is only valid when approving UNKNOWN feasibility checks");
       }
     } else if (!acceptedUnknownChecks.isEmpty()) {
-      throw new IllegalArgumentException(
+      throw new ValidationException(
           "acceptedUnknownChecks is only valid for UNKNOWN data feasibility checks");
     }
     Instant now = Instant.now();
@@ -428,8 +444,7 @@ public class InitiativeService {
           continue;
         }
         resolvedAssets.addAll(resolveDataAssets(feature, visibleById, base.includeCandidates()));
-        if (knowledge.get(feature.id(), base.includeCandidates()).conflicts().stream()
-            .anyMatch(conflict -> conflict.status().name().equals("OPEN") && conflict.blocking())) {
+        if (hasOpenBlockingConflict(feature, base.includeCandidates())) {
           checks.add(
               new FeasibilityCheck(
                   "feature-conflict:" + value,
@@ -438,6 +453,32 @@ public class InitiativeService {
                   "Required feature has an open governed conflict"));
           blockers.add("OPEN_CONFLICT:" + value);
         }
+      }
+    }
+    for (String key : requiredKnowledgeKeys(requirement)) {
+      KnowledgeObject artifact =
+          visible.stream()
+              .filter(object -> object.knowledgeKey().equals(key))
+              .findFirst()
+              .orElse(null);
+      if (artifact == null) {
+        checks.add(
+            new FeasibilityCheck(
+                "knowledge:" + key, "FAIL", null, "Required governed knowledge is not visible"));
+        blockers.add("MISSING_REQUIRED_KNOWLEDGE:" + key);
+        continue;
+      }
+      checks.add(
+          new FeasibilityCheck(
+              "knowledge:" + key, "PASS", artifact.id(), "Required governed knowledge is visible"));
+      if (hasOpenBlockingConflict(artifact, base.includeCandidates())) {
+        checks.add(
+            new FeasibilityCheck(
+                "knowledge-conflict:" + key,
+                "FAIL",
+                artifact.id(),
+                "Required governed knowledge has an open governed conflict"));
+        blockers.add("OPEN_CONFLICT:" + key);
       }
     }
     if (resolvedAssets.isEmpty()) {
@@ -530,6 +571,40 @@ public class InitiativeService {
       }
     }
     return assets;
+  }
+
+  private List<String> requiredKnowledgeKeys(ModelRequirement requirement) {
+    Set<String> keys = new java.util.LinkedHashSet<>();
+    for (String constraint : List.of("requiredKnowledgeKeys", "requiredKnowledge")) {
+      Object value = requirement.constraints().get(constraint);
+      if (value instanceof Collection<?> values) {
+        values.stream()
+            .filter(java.util.Objects::nonNull)
+            .map(String::valueOf)
+            .filter(key -> !key.isBlank())
+            .forEach(keys::add);
+      }
+    }
+    return List.copyOf(keys);
+  }
+
+  private boolean hasOpenBlockingConflict(KnowledgeObject object, boolean includeCandidates) {
+    KnowledgePackage packageData = knowledge.get(object.id(), includeCandidates);
+    if (hasOpenBlockingConflict(packageData.conflicts())) return true;
+    return packageData.relationships().stream()
+        .filter(relationship -> relationship.relationshipType() == RelationshipType.GOVERNED_BY)
+        .map(
+            relationship ->
+                relationship.fromObjectId().equals(object.id())
+                    ? relationship.toObjectId()
+                    : relationship.fromObjectId())
+        .map(id -> knowledge.get(id, includeCandidates))
+        .anyMatch(related -> hasOpenBlockingConflict(related.conflicts()));
+  }
+
+  private boolean hasOpenBlockingConflict(List<KnowledgeConflict> conflicts) {
+    return conflicts.stream()
+        .anyMatch(conflict -> conflict.status().name().equals("OPEN") && conflict.blocking());
   }
 
   private void addDataAssetChecks(
@@ -825,16 +900,28 @@ public class InitiativeService {
   private InitiativeRepository.Base require(UUID id) {
     return repository
         .find(id)
-        .orElseThrow(() -> new IllegalArgumentException("Initiative was not found"));
+        .orElseThrow(() -> new ResourceNotFoundException("Initiative was not found"));
   }
 
   private InitiativeRepository.Attempt latest(UUID initiativeId, InitiativeStage stage) {
     return repository
         .latestAttempt(initiativeId, stage)
-        .orElseThrow(() -> new IllegalArgumentException("Unknown initiative stage"));
+        .orElseThrow(() -> new ResourceNotFoundException("Unknown initiative stage"));
   }
 
   private long elapsed(Instant start, Instant end) {
     return Math.max(0, Duration.between(start, end).toMillis());
+  }
+
+  private void validateGateText(String field, String value) {
+    if (value == null) {
+      throw new ValidationException(field + " must not be null");
+    }
+    if (value.codePointCount(0, value.length()) > 200) {
+      throw new ValidationException(field + " must be at most 200 characters");
+    }
+    if (value.codePoints().anyMatch(Character::isISOControl)) {
+      throw new ValidationException(field + " must not contain control characters");
+    }
   }
 }
