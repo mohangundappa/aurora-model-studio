@@ -315,8 +315,9 @@ public class AuroraBackfillImporter {
       String name = column.group(1);
       String type = column.group(2).trim().replaceAll("\\s+", " ").toUpperCase();
       String constraints = column.group(3).toUpperCase();
-      boolean nullable = !constraints.contains("NOT NULL");
-      if (constraints.contains("PRIMARY KEY")) primaryKey = name;
+      boolean primary = constraints.contains("PRIMARY KEY");
+      boolean nullable = !constraints.contains("NOT NULL") && !primary;
+      if (primary) primaryKey = name;
       columns.add(Map.of("name", name, "type", type, "nullable", nullable));
     }
     String eventTime =
