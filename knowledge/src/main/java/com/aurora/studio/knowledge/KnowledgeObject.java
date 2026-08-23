@@ -1,6 +1,7 @@
 package com.aurora.studio.knowledge;
 
 import com.aurora.studio.common.KnowledgeType;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -29,4 +30,9 @@ public record KnowledgeObject(
     String approvedBy,
     String approvalComments,
     Map<String, Object> attributes,
-    boolean synthetic) {}
+    boolean synthetic) {
+  @JsonProperty
+  public boolean trusted() {
+    return "APPROVED".equals(lifecycleStatus);
+  }
+}

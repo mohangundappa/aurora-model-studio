@@ -10,6 +10,8 @@ import static org.mockito.Mockito.when;
 import com.aurora.studio.common.ClientContext;
 import com.aurora.studio.common.KnowledgeType;
 import com.aurora.studio.common.RelationshipType;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -17,6 +19,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 class KnowledgeServiceTest {
@@ -28,7 +31,7 @@ class KnowledgeServiceTest {
   @BeforeEach
   void setUp() {
     ClientContext.set(UUID.randomUUID());
-    service = new KnowledgeService(repository, jdbc);
+    service = new KnowledgeService(repository, jdbc, new ObjectMapper(), new ConfidenceWeights());
   }
 
   @AfterEach
@@ -82,6 +85,58 @@ class KnowledgeServiceTest {
             "actor");
     assertThat(result.confidenceBreakdown())
         .containsKeys("sourceReliability", "completeness", "recency");
+    assertThat(result.confidenceBreakdown().get("sourceReliability")).isNull();
+    assertThat(result.confidenceBreakdown().get("recency")).isNull();
+    assertThat(result.confidenceBreakdown().get("completeness")).isEqualTo(2.0 / 3.0);
+    assertThat(result.qualityAssessment().get("completeness"))
+        .isEqualTo(result.confidenceBreakdown().get("completeness"));
+  }
+
+  @Test
+  void derivesExtractionCertaintyAndRecencyFromEvidence() {
+    UUID id = UUID.randomUUID();
+    Instant recordedAt = Instant.now();
+    KnowledgeObject object = feature(id, Map.of());
+    KnowledgeEvidence evidence =
+        new KnowledgeEvidence(
+            UUID.randomUUID(),
+            ClientContext.require(),
+            id,
+            "system",
+            "source-file",
+            "uri",
+            "v1",
+            "excerpt",
+            0.4,
+            recordedAt);
+    when(repository.findById(id)).thenReturn(Optional.of(object));
+    when(repository.addEvidence(
+            any(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.anyDouble()))
+        .thenReturn(evidence.id());
+    when(repository.evidence(id)).thenReturn(List.of(evidence));
+    when(repository.findByKeyExcluding(anyString(), any())).thenReturn(List.of());
+    when(repository.conflicts(id)).thenReturn(List.of());
+    when(repository.newestEvidenceForKey("feature:x")).thenReturn(Optional.of(recordedAt));
+
+    service.addEvidence(id, "system", "source-file", "uri", "v1", "excerpt", 0.4);
+
+    ArgumentCaptor<String> breakdown = ArgumentCaptor.forClass(String.class);
+    org.mockito.Mockito.verify(jdbc)
+        .update(
+            org.mockito.ArgumentMatchers.contains("confidence_breakdown"),
+            any(),
+            breakdown.capture(),
+            any(),
+            any(),
+            any());
+    assertThat(breakdown.getValue()).contains("\"extractionCertainty\":0.4");
+    assertThat(breakdown.getValue()).contains("\"recency\":1.0");
   }
 
   @Test
@@ -178,7 +233,74 @@ class KnowledgeServiceTest {
             eq(0.5),
             any(),
             any(),
+            any(),
             any());
+  }
+
+  @Test
+  void unapprovedObjectsAreAbsentFromDefaultSearchAndByIdRetrieval() {
+    UUID id = UUID.randomUUID();
+    KnowledgeObject candidate = feature(id, Map.of());
+    when(repository.search("FEATURE", null, null, "APPROVED", null, null)).thenReturn(List.of());
+    when(repository.findById(id)).thenReturn(Optional.of(candidate));
+
+    assertThat(service.search("FEATURE", null, null, null, null, null, false)).isEmpty();
+    assertThatThrownBy(() -> service.get(id, false)).isInstanceOf(KnowledgeNotFoundException.class);
+  }
+
+  @Test
+  void explicitCandidateSearchRequiresOptIn() {
+    assertThatThrownBy(() -> service.search(null, null, null, "EXTRACTED", null, null, false))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("includeCandidates=true");
+  }
+
+  @Test
+  void listObjectsExposeTrustedAndSyntheticFields() throws Exception {
+    KnowledgeObject object = feature(UUID.randomUUID(), Map.of());
+
+    var json = new ObjectMapper().readTree(new ObjectMapper().writeValueAsString(object));
+
+    assertThat(json.get("trusted").asBoolean()).isFalse();
+    assertThat(json.get("synthetic").asBoolean()).isFalse();
+  }
+
+  @Test
+  void impactSeparatesDependenciesFromDependents() {
+    UUID root = UUID.randomUUID();
+    UUID dependency = UUID.randomUUID();
+    UUID dependent = UUID.randomUUID();
+    when(repository.findById(root)).thenReturn(Optional.of(feature(root, Map.of())));
+    when(repository.relationships(root))
+        .thenReturn(
+            List.of(
+                new KnowledgeRelationship(
+                    UUID.randomUUID(),
+                    ClientContext.require(),
+                    root,
+                    RelationshipType.USES,
+                    dependency,
+                    null),
+                new KnowledgeRelationship(
+                    UUID.randomUUID(),
+                    ClientContext.require(),
+                    dependent,
+                    RelationshipType.USES,
+                    root,
+                    null)));
+    when(repository.relationships(dependency)).thenReturn(List.of());
+    when(repository.relationships(dependent)).thenReturn(List.of());
+
+    KnowledgeService.Impact result = service.analyzeImpact(root, 1);
+
+    assertThat(result.dependsOn())
+        .extracting(KnowledgeService.ImpactPath::objectId)
+        .containsExactly(dependency);
+    assertThat(result.dependents())
+        .extracting(KnowledgeService.ImpactPath::objectId)
+        .containsExactly(dependent);
+    assertThat(result.dependsOn().getFirst().direction()).isEqualTo("DEPENDS_ON");
+    assertThat(result.dependents().getFirst().direction()).isEqualTo("DEPENDENT");
   }
 
   @Test
@@ -232,6 +354,33 @@ class KnowledgeServiceTest {
     KnowledgePackage result = service.get(featureId, true);
 
     assertThat(result.implementations()).containsExactly(implementation);
+  }
+
+  @Test
+  void packageCarriesTypeSpecificConstraintsAndUnknownPerformance() {
+    UUID featureId = UUID.randomUUID();
+    KnowledgeObject feature =
+        feature(
+            featureId,
+            Map.of(
+                "consentRequirement", "per-event consent",
+                "observationWindow", "30d",
+                "pointInTimeAvailable", true,
+                "restrictedUsage", "analytics only"));
+    when(repository.findById(featureId)).thenReturn(Optional.of(feature));
+    when(repository.evidence(featureId)).thenReturn(List.of());
+    when(repository.conflicts(featureId)).thenReturn(List.of());
+    when(repository.relationships(featureId)).thenReturn(List.of());
+
+    KnowledgePackage result = service.get(featureId, true);
+
+    assertThat(result.constraints())
+        .contains(
+            "Consent required: per-event consent",
+            "Observation window: 30d",
+            "Point-in-time available: true",
+            "Restricted usage: analytics only");
+    assertThat(result.contextualPerformance()).isNull();
   }
 
   private KnowledgeObject feature(UUID id, Map<String, Object> attributes) {

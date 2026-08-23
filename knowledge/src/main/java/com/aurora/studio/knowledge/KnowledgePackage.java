@@ -14,7 +14,7 @@ public record KnowledgePackage(
     List<KnowledgeObject> implementations,
     List<KnowledgeEvidence> evidence,
     List<KnowledgeRelationship> relationships,
-    Object contextualPerformance,
+    ContextualPerformance contextualPerformance,
     List<String> constraints,
     double confidence,
     Map<String, Object> confidenceBreakdown,

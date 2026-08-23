@@ -2,28 +2,57 @@
 
 Aurora Model Studio is a Spring Boot multi-module application:
 
-- `common` contains tenant-safe identifiers and enums.
-- `knowledge` contains the versioned Enterprise Knowledge domain, JDBC persistence,
-  lifecycle rules, confidence calculation, structured retrieval, and impact traversal.
-- `importer` reads source artifacts from an Aurora Intelligence checkout without copying
-  them, hashes each artifact, and writes extracted candidates with evidence.
-- `app` aggregates the modules, runs Flyway, exposes OpenAPI, and supplies Compose wiring.
+- `common` contains tenant context and domain enums.
+- `knowledge` contains versioned Enterprise Knowledge, JDBC persistence, lifecycle
+  enforcement, confidence calculation, structured retrieval, and impact traversal.
+- `importer` reads artifacts in an Aurora Intelligence checkout in place, hashes them,
+  and writes extracted candidates with evidence. It never copies that source tree.
+- `app` aggregates the modules, runs Flyway, exposes the HTTP API and health endpoint,
+  and supplies Compose wiring.
 
-Every persistence operation is scoped through `ClientContext`, populated by the required
-`X-Aurora-Client` request header. Unknown and missing clients are rejected with HTTP 400.
-The database carries `client_id` on every knowledge table and all repository predicates
-include it. The local actor parameter is deliberately self-declared and unverified;
-audit rows do not imply authentication.
+## Request and tenant boundaries
 
-The phase 1 flow is:
+The required `X-Aurora-Client` header is validated against configured client IDs;
+missing, malformed, and unknown IDs return HTTP 400. `ClientContext` scopes repository
+queries and writes. The database repeats that boundary: each knowledge table stores
+`client_id`, `knowledge_objects` has a unique `(client_id, id)` key, and child tables
+use composite foreign keys containing both the client and object ID. Cross-client
+references therefore fail at the database layer as well as being absent from normal
+repository queries.
 
-1. Source artifacts become immutable-version candidates.
-2. Evidence and deterministic confidence are recorded.
-3. A candidate moves through review and human approval.
-4. Approved knowledge is the only trusted retrieval result.
-5. Relationships and bounded impact paths make dependencies inspectable.
+Local actors are self-declared and unverified. They are recorded for demo traceability
+only and do not constitute authentication, authorization, or an audit identity.
 
-Phase 1 deliberately has no LLM, AI gateway, semantic/vector search, graph database,
-similarity ranking, catalog connectors, workflow orchestration, frontend, or production
-handoff. The future handoff is an HTTP contract only. Production deployment and
-monitoring are client MLOps concerns.
+## Governed knowledge loop
+
+1. Source artifacts become versioned `EXTRACTED` candidates with evidence.
+2. Candidates may move to `PENDING_REVIEW`, then require human approval to become
+   `APPROVED`.
+3. Approved knowledge is the only default trusted retrieval result; candidate
+   retrieval requires `includeCandidates=true`.
+4. Approved versions may be superseded or deprecated, but their content cannot be
+   edited. Audit rows are database-enforced append-only.
+5. Confidence is computed from evidence and populated attributes. Unknown signals are
+   omitted and weights are renormalized. Open conflicts warn and cap confidence at
+   `0.5`.
+6. Directional, bounded, cycle-safe impact traversal separates dependencies from
+   dependents. Governance-rule lookup matches the structured
+   `attributes.enforcementPoint` field.
+
+The importer currently backfills features, implementations, models, data assets, and
+standards from Aurora Intelligence without modifying that repository. Aurora Intelligence
+remains a separate product and source system.
+
+## Phase 1 boundaries
+
+Phase 1 deliberately does not contain:
+
+- AI, LLM, agent orchestration, or an AI gateway;
+- semantic or vector search, graph database, or similarity ranking;
+- catalog connectors, continuous synchronization, or production data ingestion;
+- a frontend, production deployment, runtime model serving, or monitoring;
+- a handoff receiving endpoint or implementation.
+
+The handoff is a future HTTP contract only. Production deployment and monitoring remain
+client MLOps responsibilities and require an explicit human decision in the governed
+lifecycle.

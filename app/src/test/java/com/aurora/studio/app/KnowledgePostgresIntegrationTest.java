@@ -76,6 +76,33 @@ class KnowledgePostgresIntegrationTest {
   }
 
   @Test
+  void auditRowsRejectRawUpdatesAndDeletes() {
+    UUID id = insert("audit-immutable", CLIENT, "EXTRACTED");
+    jdbc.update(
+        "insert into knowledge_audit(client_id,knowledge_object_id,to_status,actor) values(?,?,?,?)",
+        CLIENT,
+        id,
+        "PENDING_REVIEW",
+        "test");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "update knowledge_audit set actor='tampered' where client_id=? and knowledge_object_id=?",
+                    CLIENT,
+                    id))
+        .isInstanceOf(DataAccessException.class)
+        .hasMessageContaining("append-only");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "delete from knowledge_audit where client_id=? and knowledge_object_id=?",
+                    CLIENT,
+                    id))
+        .isInstanceOf(DataAccessException.class)
+        .hasMessageContaining("append-only");
+  }
+
+  @Test
   void onlyOneApprovedVersionPerClientAndKeyIsAllowed() {
     insert("one-approved", CLIENT, "APPROVED");
     assertThatThrownBy(() -> insert("one-approved", CLIENT, "APPROVED"))
@@ -92,6 +119,21 @@ class KnowledgePostgresIntegrationTest {
             CLIENT,
             id);
     assertThat(visible).isZero();
+  }
+
+  @Test
+  void childReferencesCannotCrossClientBoundary() {
+    UUID first = insert("tenant-a", CLIENT, "EXTRACTED");
+    UUID second = insert("tenant-b", OTHER, "EXTRACTED");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "insert into knowledge_relationships(client_id,from_object_id,relationship_type,to_object_id) values(?,?,?,?)",
+                    CLIENT,
+                    first,
+                    "USES",
+                    second))
+        .isInstanceOf(DataAccessException.class);
   }
 
   @Test

@@ -2,13 +2,18 @@ package com.aurora.studio.knowledge;
 
 import com.aurora.studio.common.ClientContext;
 import com.aurora.studio.common.KnowledgeType;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -31,13 +36,29 @@ public class KnowledgeService {
           List.of("hypothesis", "metrics", "sampleSizes", "decision"),
           KnowledgeType.STANDARD,
           List.of("rule", "enforcementPoint"));
+  private static final Map<KnowledgeType, List<String>> RECOMMENDED_FIELDS =
+      Map.of(
+          KnowledgeType.MODEL, List.of("features", "weights", "bias"),
+          KnowledgeType.FEATURE, List.of("inputs", "sourceConstraints"),
+          KnowledgeType.DATA_ASSET, List.of("retention", "partitioning", "accessPolicy"),
+          KnowledgeType.IMPLEMENTATION, List.of("runtime", "owner"),
+          KnowledgeType.EXPERIMENT, List.of("population", "duration", "guard"),
+          KnowledgeType.STANDARD, List.of("rationale", "enforcementEvidence"));
 
   private final KnowledgeRepository repository;
   private final JdbcTemplate jdbc;
+  private final ObjectMapper mapper;
+  private final ConfidenceWeights weights;
 
-  public KnowledgeService(KnowledgeRepository repository, JdbcTemplate jdbc) {
+  public KnowledgeService(
+      KnowledgeRepository repository,
+      JdbcTemplate jdbc,
+      ObjectMapper mapper,
+      ConfidenceWeights weights) {
     this.repository = repository;
     this.jdbc = jdbc;
+    this.mapper = mapper;
+    this.weights = weights;
   }
 
   @Transactional
@@ -45,7 +66,9 @@ public class KnowledgeService {
     validate(draft);
     int version =
         repository.findLatest(draft.knowledgeKey()).map(KnowledgeObject::version).orElse(0) + 1;
-    Map<String, Object> breakdown = confidenceBreakdown(draft, 1);
+    Map<String, Object> breakdown =
+        confidenceBreakdown(
+            draft.knowledgeKey(), draft.knowledgeType(), draft.attributes(), List.of());
     KnowledgeObject object =
         new KnowledgeObject(
             null,
@@ -65,7 +88,7 @@ public class KnowledgeService {
             null,
             confidence(breakdown, false),
             breakdown,
-            Map.of("completeness", 1.0),
+            qualityAssessment(breakdown),
             actor,
             null,
             null,
@@ -78,7 +101,7 @@ public class KnowledgeService {
   @Transactional
   public KnowledgeObject submitForReview(UUID id, String actor, String comment) {
     KnowledgeObject object = require(id);
-    transition(object, "EXTRACTED", "PENDING_REVIEW", actor, comment);
+    transition(object, "EXTRACTED", "PENDING_REVIEW");
     audit(object.id(), "EXTRACTED", "PENDING_REVIEW", actor, comment);
     return repository.findById(id).orElseThrow();
   }
@@ -141,8 +164,11 @@ public class KnowledgeService {
       String tag,
       String text,
       boolean includeCandidates) {
+    if (!includeCandidates && status != null && !"APPROVED".equals(status)) {
+      throw new IllegalArgumentException("Non-approved search requires includeCandidates=true");
+    }
     String actualStatus = status;
-    if (!includeCandidates && actualStatus == null) actualStatus = "APPROVED";
+    if (!includeCandidates) actualStatus = "APPROVED";
     return repository.search(type, domain, useCase, actualStatus, tag, text);
   }
 
@@ -182,7 +208,7 @@ public class KnowledgeService {
         evidence,
         relationships,
         null,
-        List.of(),
+        constraints(object),
         object.confidence(),
         object.confidenceBreakdown(),
         object.lifecycleStatus(),
@@ -213,17 +239,19 @@ public class KnowledgeService {
             objectId, sourceSystem, sourceType, sourceUri, sourceVersion, excerpt, certainty);
     detectConflicts(object, evidenceId);
     List<KnowledgeEvidence> evidence = repository.evidence(objectId);
-    Map<String, Object> breakdown = new HashMap<>(object.confidenceBreakdown());
-    breakdown.put("crossSourceAgreement", evidence.size() > 1 ? 1.0 : 0.5);
+    Map<String, Object> breakdown =
+        confidenceBreakdown(
+            object.knowledgeKey(), object.knowledgeType(), object.attributes(), evidence);
     double confidence =
         confidence(
             breakdown,
             repository.conflicts(objectId).stream()
                 .anyMatch(c -> c.status().name().equals("OPEN")));
     jdbc.update(
-        "update knowledge_objects set confidence=?,confidence_breakdown=?::jsonb where client_id=? and id=?",
+        "update knowledge_objects set confidence=?,confidence_breakdown=?::jsonb,quality_assessment=?::jsonb where client_id=? and id=?",
         confidence,
         json(breakdown),
+        json(qualityAssessment(breakdown)),
         ClientContext.require(),
         objectId);
     return repository.evidence(objectId).stream()
@@ -233,7 +261,7 @@ public class KnowledgeService {
   }
 
   public List<KnowledgePackage> governanceRules(String enforcementPoint) {
-    return search("STANDARD", null, null, "APPROVED", null, enforcementPoint, true).stream()
+    return repository.searchGovernanceRules(enforcementPoint).stream()
         .map(object -> get(object.id(), true))
         .toList();
   }
@@ -241,7 +269,8 @@ public class KnowledgeService {
   public Impact analyzeImpact(UUID id, int depth) {
     require(id);
     int boundedDepth = Math.max(0, Math.min(depth, 5));
-    List<ImpactPath> paths = new ArrayList<>();
+    List<ImpactPath> dependsOn = new ArrayList<>();
+    List<ImpactPath> dependents = new ArrayList<>();
     ArrayDeque<Node> queue = new ArrayDeque<>();
     queue.add(new Node(id, List.of(id), 0));
     Set<UUID> visited = new HashSet<>();
@@ -249,17 +278,22 @@ public class KnowledgeService {
       Node node = queue.remove();
       if (node.depth() >= boundedDepth) continue;
       for (KnowledgeRelationship relationship : repository.relationships(node.id())) {
-        UUID next =
-            relationship.fromObjectId().equals(node.id())
-                ? relationship.toObjectId()
-                : relationship.fromObjectId();
+        boolean pointsAway = relationship.fromObjectId().equals(node.id());
+        UUID next = pointsAway ? relationship.toObjectId() : relationship.fromObjectId();
         List<UUID> path = new ArrayList<>(node.path());
         path.add(next);
-        paths.add(new ImpactPath(next, relationship.relationshipType().name(), path));
+        ImpactPath impactPath =
+            new ImpactPath(
+                next,
+                relationship.relationshipType().name(),
+                pointsAway ? "DEPENDS_ON" : "DEPENDENT",
+                path);
+        if (pointsAway) dependsOn.add(impactPath);
+        else dependents.add(impactPath);
         if (visited.add(next)) queue.add(new Node(next, path, node.depth() + 1));
       }
     }
-    return new Impact(id, boundedDepth, paths);
+    return new Impact(id, boundedDepth, dependsOn, dependents);
   }
 
   private void validate(Draft draft) {
@@ -276,39 +310,150 @@ public class KnowledgeService {
     }
   }
 
-  private Map<String, Object> confidenceBreakdown(Draft draft, int evidenceCount) {
-    Map<String, Object> result = new HashMap<>();
-    result.put("sourceReliability", draft.synthetic() ? 0.25 : 0.75);
-    result.put("crossSourceAgreement", evidenceCount > 1 ? 1.0 : 0.5);
-    result.put("extractionCertainty", 0.9);
-    result.put("completeness", 1.0);
-    result.put("recency", 1.0);
-    result.put(
-        "executionEvidence", draft.knowledgeType() == KnowledgeType.IMPLEMENTATION ? 0.5 : 0.0);
+  private Map<String, Object> confidenceBreakdown(
+      String knowledgeKey,
+      KnowledgeType type,
+      Map<String, Object> attributes,
+      List<KnowledgeEvidence> evidence) {
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("sourceReliability", sourceReliability(evidence));
+    result.put("crossSourceAgreement", crossSourceAgreement(evidence));
+    result.put("extractionCertainty", extractionCertainty(evidence));
+    result.put("completeness", completeness(type, attributes));
+    result.put("recency", recency(knowledgeKey, evidence));
+    result.put("executionEvidence", executionEvidence(attributes, evidence));
     return result;
   }
 
+  private Map<String, Object> qualityAssessment(Map<String, Object> breakdown) {
+    Map<String, Object> quality = new LinkedHashMap<>();
+    quality.put("completeness", breakdown.get("completeness"));
+    return quality;
+  }
+
   private double confidence(Map<String, Object> breakdown, boolean conflict) {
-    double value =
-        0.25 * number(breakdown.get("sourceReliability"))
-            + 0.20 * number(breakdown.get("crossSourceAgreement"))
-            + 0.20 * number(breakdown.get("extractionCertainty"))
-            + 0.15 * number(breakdown.get("completeness"))
-            + 0.10 * number(breakdown.get("recency"))
-            + 0.10 * number(breakdown.get("executionEvidence"));
+    Map<String, Double> configured =
+        Map.of(
+            "sourceReliability", weights.sourceReliability(),
+            "crossSourceAgreement", weights.crossSourceAgreement(),
+            "extractionCertainty", weights.extractionCertainty(),
+            "completeness", weights.completeness(),
+            "recency", weights.recency(),
+            "executionEvidence", weights.executionEvidence());
+    double weighted = 0;
+    double availableWeight = 0;
+    for (Map.Entry<String, Double> entry : configured.entrySet()) {
+      Double signal = decimal(breakdown.get(entry.getKey()));
+      if (signal != null) {
+        weighted += entry.getValue() * signal;
+        availableWeight += entry.getValue();
+      }
+    }
+    double value = availableWeight == 0 ? 0 : weighted / availableWeight;
     return conflict ? Math.min(0.5, value) : Math.max(0, Math.min(1, value));
   }
 
-  private double number(Object value) {
-    return value instanceof Number number ? number.doubleValue() : 0;
+  private Double decimal(Object value) {
+    return value instanceof Number number ? number.doubleValue() : null;
+  }
+
+  private Double sourceReliability(List<KnowledgeEvidence> evidence) {
+    if (evidence.isEmpty()) return null;
+    List<Double> values =
+        evidence.stream().map(item -> sourceReliability(item.sourceType())).toList();
+    OptionalDouble average =
+        values.stream().filter(value -> value != null).mapToDouble(Double::doubleValue).average();
+    return average.isPresent() ? average.getAsDouble() : null;
+  }
+
+  private Double sourceReliability(String sourceType) {
+    String normalized = sourceType.toLowerCase();
+    if (normalized.contains("registry") || normalized.contains("executable")) return 1.0;
+    if (normalized.contains("source-file") || normalized.contains("production-code")) return 0.85;
+    if (normalized.contains("document")) return 0.65;
+    if (normalized.contains("draft")) return 0.3;
+    return null;
+  }
+
+  private Double crossSourceAgreement(List<KnowledgeEvidence> evidence) {
+    if (evidence.size() < 2) return null;
+    return (double) evidence.stream().map(KnowledgeEvidence::sourceSystem).distinct().count()
+        / evidence.size();
+  }
+
+  private Double extractionCertainty(List<KnowledgeEvidence> evidence) {
+    if (evidence.isEmpty()) return null;
+    return evidence.stream()
+        .mapToDouble(KnowledgeEvidence::extractionCertainty)
+        .average()
+        .orElse(0);
+  }
+
+  private double completeness(KnowledgeType type, Map<String, Object> attributes) {
+    List<String> fields = new ArrayList<>(REQUIRED_FIELDS.get(type));
+    fields.addAll(RECOMMENDED_FIELDS.get(type));
+    long populated =
+        fields.stream()
+            .filter(field -> attributes.get(field) != null)
+            .filter(field -> !(attributes.get(field) instanceof String value) || !value.isBlank())
+            .count();
+    return (double) populated / fields.size();
+  }
+
+  private Double recency(String knowledgeKey, List<KnowledgeEvidence> evidence) {
+    if (evidence.isEmpty()) return null;
+    Instant latest =
+        evidence.stream().map(KnowledgeEvidence::recordedAt).max(Instant::compareTo).orElseThrow();
+    Optional<Instant> newestForKey = repository.newestEvidenceForKey(knowledgeKey);
+    if (newestForKey == null || newestForKey.isEmpty()) return null;
+    double ageDays =
+        Math.max(0, Duration.between(latest, newestForKey.orElseThrow()).toSeconds() / 86400.0);
+    return Math.max(0, 1 - Math.min(1, ageDays / 365));
+  }
+
+  private List<String> constraints(KnowledgeObject object) {
+    Map<String, Object> attributes = object.attributes();
+    List<String> result = new ArrayList<>();
+    if (object.knowledgeType() == KnowledgeType.FEATURE) {
+      Object consent = attributes.get("consentRequirement");
+      if (consent == null) consent = attributes.get("sourceConstraints");
+      addConstraint(result, "Consent required", consent);
+      addConstraint(result, "Observation window", attributes.get("observationWindow"));
+      addConstraint(result, "Point-in-time available", attributes.get("pointInTimeAvailable"));
+      addConstraint(result, "Restricted usage", attributes.get("restrictedUsage"));
+    } else if (object.knowledgeType() == KnowledgeType.STANDARD) {
+      addConstraint(result, "Enforcement point", attributes.get("enforcementPoint"));
+    } else if (object.knowledgeType() == KnowledgeType.DATA_ASSET) {
+      addConstraint(result, "Governance", attributes.get("governance"));
+      addConstraint(result, "History", attributes.get("history"));
+      addConstraint(result, "Retention", attributes.get("retention"));
+      addConstraint(result, "Access policy", attributes.get("accessPolicy"));
+      addConstraint(result, "Quality limits", attributes.get("qualityLimits"));
+    } else {
+      addConstraint(result, "Prediction horizon", attributes.get("predictionHorizon"));
+      addConstraint(result, "Cohort", attributes.get("cohort"));
+    }
+    return result;
+  }
+
+  private void addConstraint(List<String> constraints, String label, Object value) {
+    if (value != null) constraints.add(label + ": " + value);
+  }
+
+  private double executionEvidence(
+      Map<String, Object> attributes, List<KnowledgeEvidence> evidence) {
+    Object declared = attributes.get("executionEvidence");
+    if (declared instanceof Boolean value && value) return 1.0;
+    return evidence.stream().anyMatch(item -> item.sourceType().toLowerCase().contains("execution"))
+        ? 1.0
+        : 0.0;
   }
 
   private KnowledgeObject require(UUID id) {
     return repository.findById(id).orElseThrow(() -> new KnowledgeNotFoundException(id));
   }
 
-  private void transition(
-      KnowledgeObject object, String from, String to, String actor, String comment) {
+  private void transition(KnowledgeObject object, String from, String to) {
     if (!object.lifecycleStatus().equals(from)) throw conflict(object, from, to);
     jdbc.update(
         "update knowledge_objects set lifecycle_status=? where client_id=? and id=?",
@@ -335,8 +480,8 @@ public class KnowledgeService {
 
   private String json(Object value) {
     try {
-      return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(value);
-    } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+      return mapper.writeValueAsString(value);
+    } catch (JsonProcessingException exception) {
       throw new IllegalArgumentException("invalid confidence breakdown", exception);
     }
   }
@@ -388,9 +533,11 @@ public class KnowledgeService {
       Map<String, Object> attributes,
       boolean synthetic) {}
 
-  public record Impact(UUID root, int depth, List<ImpactPath> paths) {}
+  public record Impact(
+      UUID root, int depth, List<ImpactPath> dependsOn, List<ImpactPath> dependents) {}
 
-  public record ImpactPath(UUID objectId, String relationshipType, List<UUID> path) {}
+  public record ImpactPath(
+      UUID objectId, String relationshipType, String direction, List<UUID> path) {}
 
   private record Node(UUID id, List<UUID> path, int depth) {}
 }

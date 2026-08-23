@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -124,6 +125,15 @@ public class KnowledgeRepository {
         text);
   }
 
+  public List<KnowledgeObject> searchGovernanceRules(String enforcementPoint) {
+    return jdbc.query(
+        "select * from knowledge_objects where client_id=? and knowledge_type='STANDARD' and lifecycle_status='APPROVED' and (? is null or attributes->>'enforcementPoint'=?) order by knowledge_key,version desc",
+        this::map,
+        ClientContext.require(),
+        enforcementPoint,
+        enforcementPoint);
+  }
+
   public List<KnowledgeEvidence> evidence(UUID objectId) {
     return jdbc.query(
         "select * from knowledge_evidence where client_id=? and knowledge_object_id=? order by recorded_at",
@@ -141,6 +151,19 @@ public class KnowledgeRepository {
                 rs.getTimestamp("recorded_at").toInstant()),
         ClientContext.require(),
         objectId);
+  }
+
+  public Optional<Instant> newestEvidenceForKey(String knowledgeKey) {
+    List<Instant> timestamps =
+        jdbc.query(
+            "select max(e.recorded_at) from knowledge_evidence e join knowledge_objects o on o.client_id=e.client_id and o.id=e.knowledge_object_id where e.client_id=? and o.knowledge_key=?",
+            (resultSet, rowNum) -> {
+              java.sql.Timestamp timestamp = resultSet.getTimestamp(1);
+              return timestamp == null ? null : timestamp.toInstant();
+            },
+            ClientContext.require(),
+            knowledgeKey);
+    return timestamps.stream().filter(java.util.Objects::nonNull).findFirst();
   }
 
   public UUID addEvidence(

@@ -7,8 +7,10 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -21,10 +23,10 @@ public class ClientScopeFilter extends OncePerRequestFilter {
   public ClientScopeFilter(
       @Value("${studio.clients:00000000-0000-0000-0000-000000000001}") String clients) {
     knownClients =
-        java.util.Arrays.stream(clients.split(","))
+        Arrays.stream(clients.split(","))
             .map(String::trim)
             .map(UUID::fromString)
-            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+            .collect(Collectors.toUnmodifiableSet());
   }
 
   @Override
