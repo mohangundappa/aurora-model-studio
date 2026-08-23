@@ -89,6 +89,7 @@ public class KnowledgeService {
             confidence(breakdown, false),
             breakdown,
             qualityAssessment(breakdown),
+            null,
             actor,
             null,
             null,
@@ -96,6 +97,12 @@ public class KnowledgeService {
             draft.attributes(),
             draft.synthetic());
     return repository.save(object);
+  }
+
+  public KnowledgeObject createExtracted(Draft draft, String actor, UUID invocationId) {
+    KnowledgeObject object = create(draft, actor);
+    repository.linkInvocation(object.id(), invocationId);
+    return repository.findById(object.id()).orElseThrow();
   }
 
   @Transactional
@@ -206,11 +213,13 @@ public class KnowledgeService {
         object.attributes(),
         implementations,
         evidence,
+        repository.fieldProvenance(id),
         relationships,
         null,
         constraints(object),
         object.confidence(),
         object.confidenceBreakdown(),
+        object.llmInvocationId(),
         object.lifecycleStatus(),
         object.lifecycleStatus().equals("APPROVED"),
         object.synthetic(),

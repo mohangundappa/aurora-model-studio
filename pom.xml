@@ -19,8 +19,10 @@
   </properties>
   <modules>
     <module>common</module>
+    <module>gateway</module>
     <module>knowledge</module>
     <module>importer</module>
+    <module>extraction</module>
     <module>app</module>
   </modules>
   <dependencyManagement>

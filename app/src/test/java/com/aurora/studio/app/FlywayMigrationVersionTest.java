@@ -21,6 +21,6 @@ class FlywayMigrationVersionTest {
             .map(matcher -> Integer.parseInt(matcher.group(1)))
             .sorted(Comparator.naturalOrder())
             .toList();
-    assertThat(versions).isNotEmpty().containsExactly(1, 2);
+    assertThat(versions).isNotEmpty().containsExactly(1, 2, 3, 4);
   }
 }

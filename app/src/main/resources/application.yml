@@ -16,3 +16,8 @@ studio:
     completeness: 0.15
     recency: 0.10
     execution-evidence: 0.10
+  llm:
+    provider: deterministic
+    model: deterministic
+  extraction:
+    interpreted-certainty: 0.72

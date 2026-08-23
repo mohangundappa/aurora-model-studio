@@ -4,6 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.aurora.studio.common.ClientContext;
+import com.aurora.studio.extraction.ExtractionService;
+import com.aurora.studio.extraction.StructuralParser;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,6 +39,7 @@ class KnowledgePostgresIntegrationTest {
           .withPassword("aurora");
 
   @Autowired JdbcTemplate jdbc;
+  @Autowired ExtractionService extraction;
 
   @DynamicPropertySource
   static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -134,6 +139,86 @@ class KnowledgePostgresIntegrationTest {
                     "USES",
                     second))
         .isInstanceOf(DataAccessException.class);
+  }
+
+  @Test
+  void invocationRowsAreAppendOnlyAndTriggerExists() {
+    UUID invocation =
+        jdbc.queryForObject(
+            "insert into llm_invocations(client_id,task_id,provider,model,prompt_template_id,prompt_template_version,prompt_hash,schema_id,outcome) values(?,?,?,?,?,?,?,?,?) returning id",
+            UUID.class,
+            CLIENT,
+            "task",
+            "deterministic",
+            "deterministic",
+            "template",
+            "1",
+            "hash",
+            "schema",
+            "OK");
+    Integer triggerCount =
+        jdbc.queryForObject(
+            "select count(*) from pg_trigger where tgrelid='llm_invocations'::regclass and tgname='llm_invocations_append_only' and not tgisinternal",
+            Integer.class);
+    assertThat(triggerCount).isEqualTo(1);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "update llm_invocations set outcome='FAILED' where client_id=? and id=?",
+                    CLIENT,
+                    invocation))
+        .isInstanceOf(DataAccessException.class)
+        .hasMessageContaining("append-only");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "delete from llm_invocations where client_id=? and id=?", CLIENT, invocation))
+        .isInstanceOf(DataAccessException.class)
+        .hasMessageContaining("append-only");
+  }
+
+  @Test
+  void extractionCandidateReferencesSuccessfulInvocationAndRemainsExtracted() {
+    StructuralParser parser = new StructuralParser();
+    var artifact =
+        parser.artifact(
+            Path.of("integration.yaml"),
+            "FEATURE",
+            "integration-feature",
+            "integration-feature is a hotel feature.");
+    var run = extraction.extractArtifacts(List.of(artifact), true);
+    assertThat(run.candidateIds()).hasSize(1);
+    UUID objectId = run.candidateIds().getFirst();
+    var row =
+        jdbc.queryForMap(
+            "select o.lifecycle_status,o.confidence,o.synthetic,o.llm_invocation_id,i.outcome from knowledge_objects o join llm_invocations i on i.client_id=o.client_id and i.id=o.llm_invocation_id where o.client_id=? and o.id=?",
+            CLIENT,
+            objectId);
+    assertThat(row)
+        .containsEntry("lifecycle_status", "EXTRACTED")
+        .containsEntry("synthetic", true)
+        .containsEntry("outcome", "OK");
+    assertThat(row.get("llm_invocation_id")).isNotNull();
+    assertThat(
+            jdbc.queryForObject(
+                "select count(*) from knowledge_field_provenance where client_id=? and knowledge_object_id=?",
+                Integer.class,
+                CLIENT,
+                objectId))
+        .isGreaterThan(0);
+    assertThat(
+            jdbc.queryForList(
+                "select provenance,extraction_certainty from knowledge_field_provenance where client_id=? and knowledge_object_id=?",
+                CLIENT,
+                objectId))
+        .anyMatch(
+            provenanceRow ->
+                "EVIDENCE_BACKED".equals(provenanceRow.get("provenance"))
+                    && ((Number) provenanceRow.get("extraction_certainty")).doubleValue() == 1.0)
+        .anyMatch(
+            adaptedRow ->
+                "ADAPTED".equals(adaptedRow.get("provenance"))
+                    && ((Number) adaptedRow.get("extraction_certainty")).doubleValue() == 0.72);
   }
 
   @Test

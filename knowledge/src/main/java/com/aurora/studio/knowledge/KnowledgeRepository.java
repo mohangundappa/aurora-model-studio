@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -85,6 +86,15 @@ public class KnowledgeRepository {
         .findFirst();
   }
 
+  public boolean hasEvidence(String key, String sourceVersion) {
+    return jdbc.queryForObject(
+        "select exists(select 1 from knowledge_evidence e join knowledge_objects o on o.client_id=e.client_id and o.id=e.knowledge_object_id where e.client_id=? and o.knowledge_key=? and e.source_version=?)",
+        Boolean.class,
+        ClientContext.require(),
+        key,
+        sourceVersion);
+  }
+
   public Optional<KnowledgeObject> findApproved(String key) {
     return jdbc
         .query(
@@ -107,22 +117,35 @@ public class KnowledgeRepository {
 
   public List<KnowledgeObject> search(
       String type, String domain, String useCase, String status, String tag, String text) {
-    return jdbc.query(
-        "select * from knowledge_objects where client_id=? and (? is null or knowledge_type=?) and (? is null or business_domain=?) and (? is null or business_use_case=?) and (? is null or lifecycle_status=?) and (? is null or ?=any(tags)) and (? is null or lower(name||' '||business_description) like lower('%'||?||'%')) order by knowledge_key,version desc",
-        this::map,
-        ClientContext.require(),
-        type,
-        type,
-        domain,
-        domain,
-        useCase,
-        useCase,
-        status,
-        status,
-        tag,
-        tag,
-        text,
-        text);
+    StringBuilder sql = new StringBuilder("select * from knowledge_objects where client_id=?");
+    List<Object> parameters = new ArrayList<>();
+    parameters.add(ClientContext.require());
+    if (type != null) {
+      sql.append(" and knowledge_type=?");
+      parameters.add(type);
+    }
+    if (domain != null) {
+      sql.append(" and business_domain=?");
+      parameters.add(domain);
+    }
+    if (useCase != null) {
+      sql.append(" and business_use_case=?");
+      parameters.add(useCase);
+    }
+    if (status != null) {
+      sql.append(" and lifecycle_status=?");
+      parameters.add(status);
+    }
+    if (tag != null) {
+      sql.append(" and ?=any(tags)");
+      parameters.add(tag);
+    }
+    if (text != null) {
+      sql.append(" and lower(name||' '||business_description) like lower(?)");
+      parameters.add("%" + text + "%");
+    }
+    sql.append(" order by knowledge_key,version desc");
+    return jdbc.query(sql.toString(), this::map, parameters.toArray());
   }
 
   public List<KnowledgeObject> searchGovernanceRules(String enforcementPoint) {
@@ -185,6 +208,45 @@ public class KnowledgeRepository {
         sourceVersion,
         excerpt,
         certainty);
+  }
+
+  public void linkInvocation(UUID objectId, UUID invocationId) {
+    jdbc.update(
+        "update knowledge_objects set llm_invocation_id=? where client_id=? and id=?",
+        invocationId,
+        ClientContext.require(),
+        objectId);
+  }
+
+  public void saveFieldProvenance(FieldProvenance field) {
+    jdbc.update(
+        "insert into knowledge_field_provenance(client_id,knowledge_object_id,field_name,field_value,provenance,citation_evidence_id,citation_excerpt,extraction_certainty) values(?,?,?,?::jsonb,?,?,?,?)",
+        ClientContext.require(),
+        field.knowledgeObjectId(),
+        field.fieldName(),
+        json(field.fieldValue()),
+        field.provenance(),
+        field.citationEvidenceId(),
+        field.citationExcerpt(),
+        field.extractionCertainty());
+  }
+
+  public List<FieldProvenance> fieldProvenance(UUID objectId) {
+    return jdbc.query(
+        "select * from knowledge_field_provenance where client_id=? and knowledge_object_id=? order by created_at",
+        (rs, row) ->
+            new FieldProvenance(
+                rs.getObject("id", UUID.class),
+                rs.getObject("client_id", UUID.class),
+                rs.getObject("knowledge_object_id", UUID.class),
+                rs.getString("field_name"),
+                readObject(rs.getString("field_value")),
+                rs.getString("provenance"),
+                rs.getObject("citation_evidence_id", UUID.class),
+                rs.getString("citation_excerpt"),
+                rs.getDouble("extraction_certainty")),
+        ClientContext.require(),
+        objectId);
   }
 
   public List<KnowledgeRelationship> relationships(UUID objectId) {
@@ -251,6 +313,7 @@ public class KnowledgeRepository {
         rs.getDouble("confidence"),
         readMap(rs.getString("confidence_breakdown")),
         readMap(rs.getString("quality_assessment")),
+        rs.getObject("llm_invocation_id", UUID.class),
         rs.getString("extracted_by"),
         rs.getString("reviewed_by"),
         rs.getString("approved_by"),
@@ -268,6 +331,14 @@ public class KnowledgeRepository {
   private Map<String, Object> readMap(String value) {
     try {
       return mapper.readValue(value, Map.class);
+    } catch (JsonProcessingException exception) {
+      throw new IllegalStateException("invalid knowledge json", exception);
+    }
+  }
+
+  private Object readObject(String value) {
+    try {
+      return mapper.readValue(value, Object.class);
     } catch (JsonProcessingException exception) {
       throw new IllegalStateException("invalid knowledge json", exception);
     }

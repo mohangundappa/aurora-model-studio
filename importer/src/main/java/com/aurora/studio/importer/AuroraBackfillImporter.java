@@ -345,10 +345,12 @@ public class AuroraBackfillImporter {
     try {
       Process process =
           new ProcessBuilder("git", "-C", root.toString(), "rev-parse", "HEAD").start();
-      return new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-    } catch (Exception exception) {
-      return "unresolved";
+      String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+      if (process.waitFor() == 0 && !output.isBlank()) return output.trim();
+    } catch (InterruptedException exception) {
+      Thread.currentThread().interrupt();
     }
+    return "unresolved";
   }
 
   private String toClassName(String name) {
