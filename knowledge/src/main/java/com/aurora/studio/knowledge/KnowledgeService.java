@@ -296,6 +296,28 @@ public class KnowledgeService {
   }
 
   @Transactional
+  public void addFieldProvenance(
+      UUID objectId,
+      String fieldName,
+      Object value,
+      String provenance,
+      UUID evidenceId,
+      String excerpt,
+      double certainty) {
+    repository.saveFieldProvenance(
+        new FieldProvenance(
+            null,
+            ClientContext.require(),
+            objectId,
+            fieldName,
+            value,
+            provenance,
+            evidenceId,
+            excerpt,
+            certainty));
+  }
+
+  @Transactional
   public void linkReferencedDataAssets(UUID objectId, List<String> tableNames, UUID evidenceId) {
     if (tableNames == null || tableNames.isEmpty()) return;
     for (String tableName : tableNames) {

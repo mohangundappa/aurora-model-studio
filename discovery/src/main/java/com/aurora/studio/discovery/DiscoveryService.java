@@ -596,6 +596,11 @@ public class DiscoveryService {
     return object.name() + " " + object.businessDescription() + " " + object.attributes();
   }
 
+  public double reuseScore(String draftText, KnowledgeObject approvedObject) {
+    Double score = overlap(draftText, searchText(approvedObject));
+    return score == null ? 0.0 : score;
+  }
+
   private String text(Map<String, Object> attributes, String... keys) {
     return Arrays.stream(keys)
         .map(attributes::get)

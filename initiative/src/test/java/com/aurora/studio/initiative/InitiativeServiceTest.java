@@ -138,9 +138,7 @@ class InitiativeServiceTest {
     assertThat(result.stages())
         .filteredOn(
             stage ->
-                stage.stage() == InitiativeStage.TARGETING_DESIGN
-                    || stage.stage() == InitiativeStage.FEATURE_DESIGN
-                    || stage.stage() == InitiativeStage.EXPERIMENT_DESIGN
+                stage.stage() == InitiativeStage.EXPERIMENT_DESIGN
                     || stage.stage() == InitiativeStage.HANDOFF)
         .allSatisfy(stage -> assertThat(stage.status()).isEqualTo(StageStatus.NOT_IMPLEMENTED));
     assertThat(
@@ -958,10 +956,7 @@ class InitiativeServiceTest {
 
   private StageStatus defaultStatus(InitiativeStage stage) {
     if (stage == InitiativeStage.REQUIREMENT_INTAKE) return StageStatus.COMPLETED;
-    if (stage == InitiativeStage.TARGETING_DESIGN
-        || stage == InitiativeStage.FEATURE_DESIGN
-        || stage == InitiativeStage.EXPERIMENT_DESIGN
-        || stage == InitiativeStage.HANDOFF) {
+    if (stage == InitiativeStage.EXPERIMENT_DESIGN || stage == InitiativeStage.HANDOFF) {
       return StageStatus.NOT_IMPLEMENTED;
     }
     if (stage == InitiativeStage.CANDIDATE_BUILD) return StageStatus.OUT_OF_SCOPE;

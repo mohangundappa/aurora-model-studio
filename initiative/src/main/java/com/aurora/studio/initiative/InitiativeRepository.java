@@ -147,6 +147,18 @@ public class InitiativeRepository {
         attemptId);
   }
 
+  public void saveDrafts(
+      UUID attemptId, List<GenerationDraft> drafts, List<String> violatedChecks) {
+    jdbc.update(
+        "update initiative_stage_attempts set generation_drafts=?::jsonb,drafts_generated=?,drafts_rejected=?,violated_checks=?::jsonb where client_id=? and id=?",
+        json(drafts),
+        drafts.size(),
+        drafts.stream().filter(draft -> "REJECTED".equals(draft.outcome())).count(),
+        json(violatedChecks),
+        ClientContext.require(),
+        attemptId);
+  }
+
   public void awaitApproval(
       UUID attemptId,
       Instant completedAt,
@@ -273,7 +285,11 @@ public class InitiativeRepository {
         rs.getLong("human_wait_duration_millis"),
         readStrings(rs.getString("blockers")),
         readChecks(rs.getString("feasibility_checks")),
-        readArtifacts(rs.getString("artifact_ids")));
+        readArtifacts(rs.getString("artifact_ids")),
+        readDrafts(rs.getString("generation_drafts")),
+        rs.getInt("drafts_generated"),
+        rs.getInt("drafts_rejected"),
+        readStrings(rs.getString("violated_checks")));
   }
 
   private Instant instant(ResultSet rs, String column) throws SQLException {
@@ -282,10 +298,7 @@ public class InitiativeRepository {
   }
 
   private boolean notImplemented(InitiativeStage stage) {
-    return stage == InitiativeStage.TARGETING_DESIGN
-        || stage == InitiativeStage.FEATURE_DESIGN
-        || stage == InitiativeStage.EXPERIMENT_DESIGN
-        || stage == InitiativeStage.HANDOFF;
+    return stage == InitiativeStage.EXPERIMENT_DESIGN || stage == InitiativeStage.HANDOFF;
   }
 
   private StageStatus nullableStageStatus(String value) {
@@ -324,6 +337,14 @@ public class InitiativeRepository {
     }
   }
 
+  private List<GenerationDraft> readDrafts(String value) {
+    try {
+      return mapper.readValue(value, new TypeReference<>() {});
+    } catch (JsonProcessingException exception) {
+      throw new IllegalStateException("invalid generation drafts", exception);
+    }
+  }
+
   public record Base(
       UUID id,
       UUID requirementId,
@@ -342,7 +363,41 @@ public class InitiativeRepository {
       long humanWaitDurationMillis,
       List<String> blockers,
       List<FeasibilityCheck> feasibilityChecks,
-      List<ArtifactReference> artifacts) {}
+      List<ArtifactReference> artifacts,
+      List<GenerationDraft> drafts,
+      int draftsGenerated,
+      int draftsRejected,
+      List<String> violatedChecks) {
+    public Attempt(
+        UUID id,
+        InitiativeStage stage,
+        int attempt,
+        StageStatus status,
+        Instant startedAt,
+        Instant completedAt,
+        long machineDurationMillis,
+        long humanWaitDurationMillis,
+        List<String> blockers,
+        List<FeasibilityCheck> feasibilityChecks,
+        List<ArtifactReference> artifacts) {
+      this(
+          id,
+          stage,
+          attempt,
+          status,
+          startedAt,
+          completedAt,
+          machineDurationMillis,
+          humanWaitDurationMillis,
+          blockers,
+          feasibilityChecks,
+          artifacts,
+          List.of(),
+          0,
+          0,
+          List.of());
+    }
+  }
 
   public record GateRow(
       UUID id,
