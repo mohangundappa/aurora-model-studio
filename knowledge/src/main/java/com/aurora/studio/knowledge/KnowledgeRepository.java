@@ -163,7 +163,11 @@ public class KnowledgeRepository {
   }
 
   public List<KnowledgeObject> discoveryRecall(
-      float[] embedding, String query, boolean includeCandidates, int limit) {
+      float[] embedding,
+      String query,
+      String embeddingProvider,
+      boolean includeCandidates,
+      int limit) {
     String status = includeCandidates ? "" : " and o.lifecycle_status='APPROVED'";
     String vector = vectorLiteral(embedding);
     LinkedHashSet<UUID> ids = new LinkedHashSet<>();
@@ -172,9 +176,11 @@ public class KnowledgeRepository {
             .queryForList(
                 "select o.id from knowledge_objects o join knowledge_embeddings e on e.client_id=o.client_id and e.knowledge_object_id=o.id where o.client_id=?"
                     + status
+                    + " and e.embedding_provider=?"
                     + " order by e.embedding <=> ?::vector limit ?",
                 UUID.class,
                 ClientContext.require(),
+                embeddingProvider,
                 vector,
                 limit)
             .stream()
@@ -192,6 +198,10 @@ public class KnowledgeRepository {
             .stream()
             .toList());
     return ids.stream().map(this::findById).flatMap(Optional::stream).toList();
+  }
+
+  public List<KnowledgeObject> allForEmbedding(boolean includeCandidates) {
+    return search(null, null, null, includeCandidates ? null : "APPROVED", null, null);
   }
 
   public void updateEmbedding(UUID objectId, float[] embedding, String provider) {

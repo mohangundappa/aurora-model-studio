@@ -11,6 +11,7 @@ import com.aurora.studio.knowledge.KnowledgePackage;
 import com.aurora.studio.knowledge.KnowledgeRelationship;
 import com.aurora.studio.knowledge.KnowledgeRepository;
 import com.aurora.studio.knowledge.KnowledgeService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -24,6 +25,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,6 +50,7 @@ public class DiscoveryService {
   private final EmbeddingProvider embeddings;
   private final LlmGateway gateway;
   private final DiscoveryWeights weights;
+  private final ObjectMapper mapper;
 
   public DiscoveryService(
       KnowledgeService knowledge,
@@ -56,12 +59,32 @@ public class DiscoveryService {
       EmbeddingProvider embeddings,
       LlmGateway gateway,
       DiscoveryWeights weights) {
+    this(
+        knowledge,
+        knowledgeRepository,
+        repository,
+        embeddings,
+        gateway,
+        weights,
+        new ObjectMapper());
+  }
+
+  @Autowired
+  public DiscoveryService(
+      KnowledgeService knowledge,
+      KnowledgeRepository knowledgeRepository,
+      DiscoveryRepository repository,
+      EmbeddingProvider embeddings,
+      LlmGateway gateway,
+      DiscoveryWeights weights,
+      ObjectMapper mapper) {
     this.knowledge = knowledge;
     this.knowledgeRepository = knowledgeRepository;
     this.repository = repository;
     this.embeddings = embeddings;
     this.gateway = gateway;
     this.weights = weights;
+    this.mapper = mapper;
   }
 
   @Transactional
@@ -79,38 +102,30 @@ public class DiscoveryService {
     List<KnowledgeObject> visible =
         knowledge.search(null, null, null, null, null, null, includeCandidates);
     Embedding requestEmbedding = embeddings.embed(requirementText(requirement));
-    for (KnowledgeObject object : visible) {
-      Embedding objectEmbedding = embeddings.embed(searchText(object));
-      knowledgeRepository.updateEmbedding(
-          object.id(), objectEmbedding.vector(), objectEmbedding.provider());
-    }
     List<KnowledgeObject> recalled =
         knowledgeRepository.discoveryRecall(
             requestEmbedding.vector(),
             requirementText(requirement),
+            requestEmbedding.provider(),
             includeCandidates,
             Math.min(100, Math.max(20, visible.size())));
-    if (recalled.isEmpty()) recalled = visible;
     Set<UUID> recalledIds =
         recalled.stream().map(KnowledgeObject::id).collect(java.util.stream.Collectors.toSet());
     List<KnowledgeObject> candidates =
         visible.stream().filter(object -> recalledIds.contains(object.id())).toList();
-    boolean missingCancellationEvent = missingCancellationEvent(requirement, visible);
+    List<String> missingObservables = missingObservables(requirement, visible);
     List<DiscoveryCandidate> ranked =
         candidates.stream()
-            .map(
-                object ->
-                    rank(requirement, object, visible, includeCandidates, missingCancellationEvent))
+            .map(object -> rank(requirement, object, visible, includeCandidates))
             .sorted(
                 java.util.Comparator.comparing(
                         DiscoveryCandidate::compositeScore,
                         java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder()))
                     .thenComparing(DiscoveryCandidate::knowledgeKey))
             .toList();
-    String classification = overallClassification(ranked);
-    List<String> reasons = overallReasons(ranked, classification, missingCancellationEvent);
-    List<String> blockers =
-        ranked.stream().flatMap(item -> item.blockers().stream()).distinct().toList();
+    List<String> runBlockers = new ArrayList<>(missingObservables);
+    String classification = overallClassification(ranked, runBlockers);
+    List<String> reasons = overallReasons(ranked, missingObservables);
     UUID runId = UUID.randomUUID();
     DiscoveryRun draft =
         new DiscoveryRun(
@@ -120,7 +135,7 @@ public class DiscoveryService {
             requestEmbedding.provider(),
             classification,
             reasons,
-            blockers,
+            runBlockers,
             ranked);
     UUID id =
         repository.saveRun(
@@ -137,7 +152,7 @@ public class DiscoveryService {
         requestEmbedding.provider(),
         classification,
         reasons,
-        blockers,
+        runBlockers,
         ranked);
   }
 
@@ -146,23 +161,33 @@ public class DiscoveryService {
         repository
             .findRun(id)
             .orElseThrow(() -> new IllegalArgumentException("Discovery run was not found"));
-    return new com.fasterxml.jackson.databind.ObjectMapper()
-        .convertValue(result, DiscoveryRun.class);
+    return mapper.convertValue(result, DiscoveryRun.class);
+  }
+
+  public int backfillEmbeddings(boolean includeCandidates) {
+    List<KnowledgeObject> objects =
+        knowledge.search(null, null, null, null, null, null, includeCandidates);
+    for (KnowledgeObject object : objects) {
+      Embedding embedding = embeddings.embed(searchText(object));
+      knowledgeRepository.updateEmbedding(object.id(), embedding.vector(), embedding.provider());
+    }
+    return objects.size();
   }
 
   private DiscoveryCandidate rank(
       ModelRequirement requirement,
       KnowledgeObject object,
       List<KnowledgeObject> visible,
-      boolean includeCandidates,
-      boolean missingCancellationEvent) {
-    KnowledgePackage pack = knowledge.get(object.id(), true);
+      boolean includeCandidates) {
+    KnowledgePackage pack = knowledge.get(object.id(), includeCandidates);
     Map<String, Double> scorecard = new LinkedHashMap<>();
     scorecard.put("targetAlignment", targetAlignment(requirement, object));
     scorecard.put("populationAlignment", populationAlignment(requirement, object));
     scorecard.put("horizonAlignment", horizonAlignment(requirement, object));
-    scorecard.put("featureAvailability", featureAvailability(requirement, object, visible, pack));
-    scorecard.put("dataAvailability", dataAvailability(object, visible));
+    scorecard.put(
+        "featureAvailability",
+        featureAvailability(requirement, object, visible, pack, includeCandidates));
+    scorecard.put("dataAvailability", dataAvailability(object, includeCandidates));
     scorecard.put(
         "implementationAvailability",
         object.knowledgeType().name().equals("MODEL")
@@ -181,8 +206,9 @@ public class DiscoveryService {
     }
     if (pack.evidence().isEmpty()) blockers.add("NO_EVIDENCE");
     if (!includeCandidates && !object.trusted()) blockers.add("UNAPPROVED_KNOWLEDGE");
-    if (object.synthetic()) blockers.add("SYNTHETIC_EVIDENCE_ONLY");
-    if (missingCancellationEvent) blockers.add("MISSING_TARGET_EVENT_BOOKING_CANCELLED");
+    if (object.synthetic() && !requirement.syntheticEvidenceAllowed()) {
+      blockers.add("SYNTHETIC_EVIDENCE_ONLY");
+    }
     List<String> gaps = gaps(requirement, object, visible, pack, scorecard);
     String classification;
     List<String> reasons = new ArrayList<>();
@@ -302,14 +328,36 @@ public class DiscoveryService {
     return true;
   }
 
-  private boolean missingCancellationEvent(
-      ModelRequirement requirement, List<KnowledgeObject> all) {
-    String text =
-        (requirement.predictionTarget() + " " + requirement.observableDefinition()).toUpperCase();
-    if (!text.contains("CANCEL")) return false;
+  private List<String> missingObservables(ModelRequirement requirement, List<KnowledgeObject> all) {
+    return requirement.requiredObservables().stream()
+        .filter(observable -> !observablePresent(observable, all))
+        .map(observable -> "MISSING_TARGET_OBSERVABLE:" + observable)
+        .toList();
+  }
+
+  private boolean observablePresent(String observable, List<KnowledgeObject> all) {
+    String expected = observable.toLowerCase(Locale.ROOT);
     return all.stream()
-        .flatMap(object -> object.attributes().values().stream())
-        .noneMatch(value -> String.valueOf(value).toUpperCase().contains("BOOKING_CANCELLED"));
+        .anyMatch(
+            object ->
+                object.name().equalsIgnoreCase(observable)
+                    || containsObservable(object.attributes(), expected));
+  }
+
+  private boolean containsObservable(Object value, String expected) {
+    if (value == null) return false;
+    if (value instanceof Map<?, ?> map) {
+      return map.entrySet().stream()
+          .anyMatch(
+              entry ->
+                  containsObservable(entry.getKey(), expected)
+                      || containsObservable(entry.getValue(), expected));
+    }
+    if (value instanceof Collection<?> collection) {
+      return collection.stream().anyMatch(item -> containsObservable(item, expected));
+    }
+    String text = String.valueOf(value).toLowerCase(Locale.ROOT);
+    return text.equals(expected) || text.contains(expected);
   }
 
   private List<String> gaps(
@@ -373,7 +421,8 @@ public class DiscoveryService {
       ModelRequirement requirement,
       KnowledgeObject object,
       List<KnowledgeObject> visible,
-      KnowledgePackage pack) {
+      KnowledgePackage pack,
+      boolean includeCandidates) {
     Object required = requirement.constraints().get("requiredFeatures");
     if (required instanceof Collection<?> values && !values.isEmpty()) {
       long available =
@@ -407,7 +456,7 @@ public class DiscoveryService {
                                               .name()
                                               .equalsIgnoreCase(String.valueOf(value))
                                           && knowledge
-                                              .get(candidate.id(), true)
+                                              .get(candidate.id(), includeCandidates)
                                               .conflicts()
                                               .stream()
                                               .noneMatch(
@@ -452,11 +501,11 @@ public class DiscoveryService {
     return available / (double) names.length;
   }
 
-  private Double dataAvailability(KnowledgeObject object, List<KnowledgeObject> visible) {
+  private Double dataAvailability(KnowledgeObject object, boolean includeCandidates) {
     Object assets = object.attributes().get("dataAssets");
     if (assets instanceof Collection<?> values && !values.isEmpty()) {
       List<KnowledgeObject> dataAssets =
-          knowledge.search("DATA_ASSET", null, null, null, null, null, false);
+          knowledge.search("DATA_ASSET", null, null, null, null, null, includeCandidates);
       long available =
           values.stream()
               .filter(
@@ -472,7 +521,7 @@ public class DiscoveryService {
       return available / (double) values.size();
     }
     if (object.knowledgeType().name().equals("MODEL")
-        && knowledge.search("DATA_ASSET", null, null, null, null, null, false).stream()
+        && knowledge.search("DATA_ASSET", null, null, null, null, null, includeCandidates).stream()
             .anyMatch(
                 candidate ->
                     candidate.knowledgeType().name().equals("DATA_ASSET")
@@ -493,18 +542,20 @@ public class DiscoveryService {
     return available == 0 ? null : weighted / available;
   }
 
-  private String overallClassification(List<DiscoveryCandidate> candidates) {
+  private String overallClassification(List<DiscoveryCandidate> candidates, List<String> blockers) {
+    if (!blockers.isEmpty()) return "NOT_RECOMMENDED";
     if (candidates.isEmpty()) return "GENERATE";
     return candidates.getFirst().classification();
   }
 
   private List<String> overallReasons(
-      List<DiscoveryCandidate> candidates,
-      String classification,
-      boolean missingCancellationEvent) {
-    if (candidates.isEmpty()) return List.of("NO_RECALL_CANDIDATE");
+      List<DiscoveryCandidate> candidates, List<String> missingObservables) {
     LinkedHashSet<String> reasons = new LinkedHashSet<>();
-    if (missingCancellationEvent) reasons.add("MISSING_TARGET_EVENT_BOOKING_CANCELLED");
+    reasons.addAll(missingObservables);
+    if (candidates.isEmpty()) {
+      reasons.add("NO_RECALL_CANDIDATE");
+      return reasons.stream().toList();
+    }
     candidates.stream()
         .flatMap(candidate -> candidate.reasonCodes().stream())
         .forEach(reasons::add);
@@ -522,7 +573,8 @@ public class DiscoveryService {
         String.valueOf(requirement.outcomeHorizon()),
         String.valueOf(requirement.decisionLatency()),
         String.valueOf(requirement.requiredAction()),
-        String.valueOf(requirement.constraints()));
+        String.valueOf(requirement.constraints()),
+        String.valueOf(requirement.requiredObservables()));
   }
 
   private String searchText(KnowledgeObject object) {

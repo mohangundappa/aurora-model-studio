@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -16,6 +17,7 @@ import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,16 +51,28 @@ public class KnowledgeService {
   private final JdbcTemplate jdbc;
   private final ObjectMapper mapper;
   private final ConfidenceWeights weights;
+  private final List<KnowledgeEmbeddingWriter> embeddingWriters;
 
   public KnowledgeService(
       KnowledgeRepository repository,
       JdbcTemplate jdbc,
       ObjectMapper mapper,
       ConfidenceWeights weights) {
+    this(repository, jdbc, mapper, weights, Collections.emptyList());
+  }
+
+  @Autowired
+  public KnowledgeService(
+      KnowledgeRepository repository,
+      JdbcTemplate jdbc,
+      ObjectMapper mapper,
+      ConfidenceWeights weights,
+      List<KnowledgeEmbeddingWriter> embeddingWriters) {
     this.repository = repository;
     this.jdbc = jdbc;
     this.mapper = mapper;
     this.weights = weights;
+    this.embeddingWriters = embeddingWriters;
   }
 
   @Transactional
@@ -96,7 +110,9 @@ public class KnowledgeService {
             null,
             draft.attributes(),
             draft.synthetic());
-    return repository.save(object);
+    KnowledgeObject saved = repository.save(object);
+    embeddingWriters.forEach(writer -> writer.write(saved));
+    return saved;
   }
 
   public KnowledgeObject createExtracted(Draft draft, String actor, UUID invocationId) {

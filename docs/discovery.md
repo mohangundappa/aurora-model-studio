@@ -18,6 +18,16 @@ missing `BOOKING_CANCELLED` event rather than inventing a proxy target.
 Deterministic embeddings are the offline default and are byte-identical for identical
 text. An OpenAI embedding adapter is shipped but requires `OPENAI_API_KEY`; provider
 identities are persisted because vectors from different providers are not comparable.
+Object vectors are written when knowledge is created or versioned. Existing objects can
+be re-embedded with `--backfill-embeddings`; discovery runs embed only the requirement
+and read vectors matching the active provider.
+
+Requirements may declare `requiredObservables`. Each unresolved observable becomes a
+run-level `MISSING_TARGET_OBSERVABLE:<name>` blocker, while candidate classifications
+continue to describe their own structural fit. Synthetic evidence is blocked for an
+ordinary client requirement and can be enabled explicitly with
+`syntheticEvidenceAllowed` for exploratory demonstrations; synthetic watermarking
+remains visible in every output.
 
 The local demonstration corpus is deliberately small: 33 real Aurora artifacts and
 the expanded watermarked synthetic estate are not an enterprise-scale legacy corpus.
