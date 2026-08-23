@@ -23,17 +23,25 @@ experiment unknowns, required observables, and no open blocking knowledge
 conflicts. Generated `EXTRACTED` feature candidates and the live
 loyalty-tenure conflict therefore block the handoff.
 
+Approval is explicit human governance: an `APPROVE` decision requires a named
+human actor and a non-empty reason. Agent identities, including the initiative
+orchestrator, are refused. Knowledge approval also requires an explicit actor;
+the API does not substitute an anonymous demo actor.
+
 An approved handoff transfers an immutable, content-hashed design package to
 Aurora using:
 
 ```text
 POST /api/models/{name}/candidates
+X-Aurora-Studio-Token: <shared token>
 → 201 { candidateId, status: "AWAITING_WEIGHTS" }
 ```
 
 The package hash is the idempotency key and every attempt is persisted.
-Transport or remote failures are contained and never create a local fake
-registration. The package contains **no trained model, no weights, and no
+The shared token protects this write seam; if it is absent, Model Studio
+records `AURORA_NOT_CONFIGURED` without attempting an anonymous request.
+Transport or remote failures are contained and never create a local
+fake registration. The package contains **no trained model, no weights, and no
 evaluation**. It does not claim `TESTED`; Model Studio never trains a model.
 Client MLOps supplies weights and evaluation later, under a separate human
 controlled process.

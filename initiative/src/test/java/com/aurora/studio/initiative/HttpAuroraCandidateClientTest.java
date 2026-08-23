@@ -19,6 +19,8 @@ class HttpAuroraCandidateClientTest {
           exchange -> {
             assertThat(exchange.getRequestHeaders().getFirst("Idempotency-Key"))
                 .isEqualTo("package-hash");
+            assertThat(exchange.getRequestHeaders().getFirst("X-Aurora-Studio-Token"))
+                .isEqualTo("studio-token");
             assertThat(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8))
                 .contains("\"packageHash\":\"package-hash\"");
             byte[] response =
@@ -32,7 +34,9 @@ class HttpAuroraCandidateClientTest {
 
       HttpAuroraCandidateClient client =
           new HttpAuroraCandidateClient(
-              new ObjectMapper(), "http://localhost:" + server.getAddress().getPort());
+              new ObjectMapper(),
+              "http://localhost:" + server.getAddress().getPort(),
+              "studio-token");
 
       AuroraCandidateClient.Registration registration =
           client.register("model", Map.of("packageHash", "package-hash"), "package-hash");
@@ -49,12 +53,53 @@ class HttpAuroraCandidateClientTest {
   @Test
   void containsAnUnreachableAuroraAsAStableFailureCode() {
     HttpAuroraCandidateClient client =
-        new HttpAuroraCandidateClient(new ObjectMapper(), "http://127.0.0.1:1");
+        new HttpAuroraCandidateClient(new ObjectMapper(), "http://127.0.0.1:1", "studio-token");
 
     AuroraCandidateClient.Registration registration =
         client.register("model", Map.of("packageHash", "package-hash"), "package-hash");
 
     assertThat(registration.successful()).isFalse();
     assertThat(registration.failureCode()).isEqualTo("AURORA_UNREACHABLE");
+  }
+
+  @Test
+  void classifiesMalformedSuccessBodyAsResponseInvalid() throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    try {
+      server.createContext(
+          "/api/models/model/candidates",
+          exchange -> {
+            exchange.sendResponseHeaders(201, 0);
+            exchange.getResponseBody().write("{not json".getBytes(StandardCharsets.UTF_8));
+            exchange.close();
+          });
+      server.start();
+
+      HttpAuroraCandidateClient client =
+          new HttpAuroraCandidateClient(
+              new ObjectMapper(),
+              "http://localhost:" + server.getAddress().getPort(),
+              "studio-token");
+
+      AuroraCandidateClient.Registration registration =
+          client.register("model", Map.of("packageHash", "package-hash"), "package-hash");
+
+      assertThat(registration.successful()).isFalse();
+      assertThat(registration.responseStatus()).isEqualTo(201);
+      assertThat(registration.failureCode()).isEqualTo("AURORA_RESPONSE_INVALID");
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void refusesAnonymousRegistrationWhenTokenIsNotConfigured() {
+    HttpAuroraCandidateClient client =
+        new HttpAuroraCandidateClient(new ObjectMapper(), "http://127.0.0.1:1", "");
+
+    AuroraCandidateClient.Registration registration =
+        client.register("model", Map.of("packageHash", "package-hash"), "package-hash");
+
+    assertThat(registration.failureCode()).isEqualTo("AURORA_NOT_CONFIGURED");
   }
 }

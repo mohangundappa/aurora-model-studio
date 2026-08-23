@@ -277,6 +277,54 @@ class InitiativeServiceTest {
   }
 
   @Test
+  void approvingGateRequiresReasonAndHumanActor() {
+    InitiativeRepository.Attempt awaiting =
+        new InitiativeRepository.Attempt(
+            attemptId,
+            InitiativeStage.REUSE_DECISION,
+            1,
+            StageStatus.AWAITING_APPROVAL,
+            Instant.now().minusSeconds(2),
+            Instant.now().minusSeconds(1),
+            7,
+            0,
+            List.of(),
+            List.of(),
+            List.of());
+    when(repository.find(initiativeId)).thenReturn(Optional.of(base()));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.REUSE_DECISION))
+        .thenReturn(Optional.of(awaiting));
+
+    assertThatThrownBy(
+            () ->
+                service.decide(
+                    initiativeId,
+                    InitiativeStage.REUSE_DECISION,
+                    new GateDecisionRequest("APPROVE", "Maya Chen", "")))
+        .isInstanceOf(ValidationException.class)
+        .hasMessage("reason is required for every gate decision");
+    assertThatThrownBy(
+            () ->
+                service.decide(
+                    initiativeId,
+                    InitiativeStage.REUSE_DECISION,
+                    new GateDecisionRequest(
+                        "APPROVE", "initiative-orchestrator", "Approve the governed design")))
+        .isInstanceOf(ValidationException.class)
+        .hasMessage("agent identities cannot approve human-gated stages");
+    assertThatThrownBy(
+            () ->
+                service.decide(
+                    initiativeId,
+                    InitiativeStage.REUSE_DECISION,
+                    new GateDecisionRequest(
+                        "APPROVE", "agent-reviewer", "Approve the governed design")))
+        .isInstanceOf(ValidationException.class)
+        .hasMessage("agent identities cannot approve human-gated stages");
+    verify(repository, never()).insertGateDecision(any(), any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
   void feasibilityUsesAssetsResolvedFromRequirementArtifacts() {
     KnowledgeObject unrelated = dataAsset(UUID.randomUUID(), "unrelated", List.of("OTHER_EVENT"));
     KnowledgeObject required =

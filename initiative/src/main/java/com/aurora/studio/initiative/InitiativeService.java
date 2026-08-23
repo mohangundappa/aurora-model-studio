@@ -325,13 +325,16 @@ public class InitiativeService {
     }
     validateGateText("actor", request.actor());
     if (request.reason() != null) validateGateText("reason", request.reason());
+    if (request.actor().toLowerCase().contains("agent")
+        || request.actor().toLowerCase().contains("orchestrator")) {
+      throw new ValidationException("agent identities cannot approve human-gated stages");
+    }
     String decision = request.decision() == null ? "" : request.decision().trim().toUpperCase();
     if (!Set.of("APPROVE", "REJECT", "RETURN").contains(decision)) {
       throw new ValidationException("decision must be APPROVE, REJECT, or RETURN");
     }
-    if ((decision.equals("REJECT") || decision.equals("RETURN"))
-        && (request.reason() == null || request.reason().isBlank())) {
-      throw new ValidationException("reason is required for reject and return");
+    if (request.reason() == null || request.reason().isBlank()) {
+      throw new ValidationException("reason is required for every gate decision");
     }
     require(initiativeId);
     InitiativeRepository.Attempt current = latest(initiativeId, stage);
