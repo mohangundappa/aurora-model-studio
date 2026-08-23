@@ -282,13 +282,14 @@ public class AuroraBackfillImporter {
       Path root,
       Map<String, Integer> counts)
       throws IOException {
+    String evidenceVersion = currentCommit(root) + ":" + sourceVersion;
     Integer existing =
         jdbc.queryForObject(
             "select count(*) from knowledge_evidence e join knowledge_objects o on o.id=e.knowledge_object_id where e.client_id=? and o.knowledge_key=? and e.source_version=?",
             Integer.class,
             IMPORT_CLIENT,
             key,
-            sourceVersion);
+            evidenceVersion);
     if (existing > 0) return repository.findLatest(key).orElse(null);
     KnowledgeObject object =
         service.create(
@@ -310,7 +311,7 @@ public class AuroraBackfillImporter {
         "aurora-intelligence",
         "source-file",
         root.relativize(source).toString(),
-        sourceVersion,
+        evidenceVersion,
         excerpt(source),
         0.95);
     counts.merge(type.name(), 1, Integer::sum);
