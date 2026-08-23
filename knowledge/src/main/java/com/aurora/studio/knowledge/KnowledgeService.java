@@ -35,7 +35,7 @@ public class KnowledgeService {
           KnowledgeType.DATA_ASSET,
           List.of("grain", "primaryKey", "eventTime", "history"),
           KnowledgeType.IMPLEMENTATION,
-          List.of("languageOrKind", "sourceTraceability"),
+          List.of("language", "sourceTraceability"),
           KnowledgeType.EXPERIMENT,
           List.of("hypothesis", "metrics", "sampleSizes", "decision"),
           KnowledgeType.STANDARD,
@@ -678,7 +678,8 @@ public class KnowledgeService {
             "targetEvent",
             "predictionHorizon",
             "grain",
-            "measurementUnit"));
+            "measurementUnit",
+            "implementationKind"));
     return fields.stream().toList();
   }
 

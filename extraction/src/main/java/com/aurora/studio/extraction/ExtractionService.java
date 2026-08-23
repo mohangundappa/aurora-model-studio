@@ -261,9 +261,9 @@ public class ExtractionService {
       if (value != null) attributes.put(field, value);
     }
     if (type == KnowledgeType.IMPLEMENTATION) {
-      attributes.put(
-          "languageOrKind",
-          artifact.path().toString().toLowerCase().endsWith(".java") ? "Java" : "source");
+      if (artifact.path().toString().toLowerCase().endsWith(".java")) {
+        attributes.put("language", "Java");
+      }
       attributes.put("sourceTraceability", artifact.structuralFact().sourcePath());
     }
     Object sourceDeclared = artifact.structuralFact().inputs().get("sourceDeclared");

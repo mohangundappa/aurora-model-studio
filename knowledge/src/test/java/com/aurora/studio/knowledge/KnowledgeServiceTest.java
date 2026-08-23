@@ -482,6 +482,91 @@ class KnowledgeServiceTest {
   }
 
   @Test
+  void comparesImplementationLanguageWithoutMixingImplementationKind() {
+    UUID id = UUID.randomUUID();
+    UUID evidenceId = UUID.randomUUID();
+    KnowledgeObject object =
+        implementation(
+            id, Map.of("language", "Java", "implementationKind", "Spring calculator bean"));
+    KnowledgeObject other = implementation(UUID.randomUUID(), Map.of("language", "Java"));
+    KnowledgeEvidence evidence =
+        new KnowledgeEvidence(
+            evidenceId,
+            ClientContext.require(),
+            id,
+            "system",
+            "source-file",
+            "uri",
+            "v1",
+            "excerpt",
+            0.9,
+            java.time.Instant.now());
+    when(repository.findById(id)).thenReturn(Optional.of(object));
+    when(repository.addEvidence(
+            any(), anyString(), anyString(), anyString(), anyString(), anyString(), anyDouble()))
+        .thenReturn(evidenceId);
+    when(repository.evidence(id)).thenReturn(List.of(evidence));
+    when(repository.findByKeyExcluding(anyString(), any())).thenReturn(List.of(other));
+    when(repository.conflicts(id)).thenReturn(List.of());
+    when(jdbc.queryForObject(anyString(), eq(Integer.class), any(), any(), any())).thenReturn(0);
+
+    service.addEvidence(id, "system", "source-file", "uri", "v1", "excerpt", 0.9);
+
+    org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never())
+        .update(
+            org.mockito.ArgumentMatchers.contains("insert into knowledge_conflicts"),
+            any(),
+            any(),
+            any(),
+            any(),
+            any());
+  }
+
+  @Test
+  void implementationLanguageDisagreementRemainsBlocking() {
+    UUID id = UUID.randomUUID();
+    UUID evidenceId = UUID.randomUUID();
+    KnowledgeObject object =
+        implementation(id, Map.of("language", "Java", "implementationKind", "calculator"));
+    KnowledgeObject other =
+        implementation(
+            UUID.randomUUID(), Map.of("language", "Kotlin", "implementationKind", "calculator"));
+    KnowledgeEvidence evidence =
+        new KnowledgeEvidence(
+            evidenceId,
+            ClientContext.require(),
+            id,
+            "system",
+            "source-file",
+            "uri",
+            "v1",
+            "excerpt",
+            0.9,
+            java.time.Instant.now());
+    when(repository.findById(id)).thenReturn(Optional.of(object));
+    when(repository.addEvidence(
+            any(), anyString(), anyString(), anyString(), anyString(), anyString(), anyDouble()))
+        .thenReturn(evidenceId);
+    when(repository.evidence(id)).thenReturn(List.of(evidence));
+    when(repository.findByKeyExcluding(anyString(), any())).thenReturn(List.of(other));
+    when(repository.conflicts(id)).thenReturn(List.of());
+    when(jdbc.queryForObject(anyString(), eq(Integer.class), any(), any(), any())).thenReturn(0);
+
+    service.addEvidence(id, "system", "source-file", "uri", "v1", "excerpt", 0.9);
+
+    org.mockito.ArgumentCaptor<String> conflictClass = ArgumentCaptor.forClass(String.class);
+    org.mockito.Mockito.verify(jdbc)
+        .update(
+            org.mockito.ArgumentMatchers.contains("insert into knowledge_conflicts"),
+            any(),
+            any(),
+            any(),
+            conflictClass.capture(),
+            any());
+    assertThat(conflictClass.getValue()).isEqualTo("BLOCKING");
+  }
+
+  @Test
   void unapprovedObjectsAreAbsentFromDefaultSearchAndByIdRetrieval() {
     UUID id = UUID.randomUUID();
     KnowledgeObject candidate = feature(id, Map.of());
@@ -578,7 +663,7 @@ class KnowledgeServiceTest {
             null,
             null,
             Map.of(
-                "languageOrKind", "java",
+                "language", "java",
                 "sourceTraceability", "src/X.java"),
             false);
     when(repository.findById(featureId)).thenReturn(Optional.of(feature));
@@ -653,6 +738,35 @@ class KnowledgeServiceTest {
             "completeness", 1.0,
             "recency", 1.0,
             "executionEvidence", 1.0),
+        Map.of(),
+        null,
+        "actor",
+        null,
+        null,
+        null,
+        attributes,
+        false);
+  }
+
+  private KnowledgeObject implementation(UUID id, Map<String, Object> attributes) {
+    return new KnowledgeObject(
+        id,
+        ClientContext.require(),
+        "implementation:x",
+        1,
+        KnowledgeType.IMPLEMENTATION,
+        "X",
+        "domain",
+        "use-case",
+        "description",
+        Map.of(),
+        Map.of(),
+        List.of(),
+        "EXTRACTED",
+        null,
+        null,
+        0.7,
+        Map.of(),
         Map.of(),
         null,
         "actor",

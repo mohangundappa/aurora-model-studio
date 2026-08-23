@@ -232,6 +232,81 @@ class ExtractionServiceTest {
   }
 
   @Test
+  void implementationFactsKeepLanguageSeparateFromImplementationKind() {
+    StructuralParser parser = new StructuralParser();
+    LlmGateway gateway = mock(LlmGateway.class);
+    KnowledgeService knowledge = mock(KnowledgeService.class);
+    KnowledgeRepository repository = mock(KnowledgeRepository.class);
+    UUID objectId = UUID.randomUUID();
+    KnowledgeObject object = mock(KnowledgeObject.class);
+    when(object.id()).thenReturn(objectId);
+    when(object.knowledgeType()).thenReturn(KnowledgeType.IMPLEMENTATION);
+    KnowledgeEvidence evidence =
+        new KnowledgeEvidence(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            objectId,
+            "test",
+            "source-file",
+            "SignalEngine.java",
+            "v1",
+            "SignalEngine",
+            1.0,
+            Instant.now());
+    when(gateway.complete(any()))
+        .thenReturn(
+            new LlmResult(
+                UUID.randomUUID(),
+                LlmOutcome.OK,
+                Map.of(
+                    "fields",
+                    List.of(
+                        Map.of(
+                            "field",
+                            "businessRationale",
+                            "value",
+                            "SignalEngine",
+                            "citation",
+                            "SignalEngine",
+                            "classification",
+                            "EVIDENCE_BACKED")),
+                    "relationships",
+                    List.of()),
+                null,
+                1,
+                1,
+                0,
+                1,
+                0));
+    when(knowledge.createExtracted(any(), any(), any())).thenReturn(object);
+    when(knowledge.addEvidence(any(), any(), any(), any(), any(), any(), anyDouble()))
+        .thenReturn(evidence);
+
+    ClientContext.set(UUID.randomUUID());
+    try {
+      ExtractionService service =
+          new ExtractionService(parser, gateway, knowledge, repository, 0.72);
+      service.extractArtifacts(
+          List.of(
+              parser.artifact(
+                  Path.of("SignalEngine.java"),
+                  "IMPLEMENTATION",
+                  "SignalEngine",
+                  "SignalEngine reads raw_events")),
+          false);
+    } finally {
+      ClientContext.clear();
+    }
+
+    ArgumentCaptor<KnowledgeService.Draft> draft =
+        ArgumentCaptor.forClass(KnowledgeService.Draft.class);
+    verify(knowledge).createExtracted(draft.capture(), any(), any());
+    assertThat(draft.getValue().attributes())
+        .containsEntry("language", "Java")
+        .doesNotContainKeys("languageOrKind", "implementationKind");
+  }
+
+  @Test
   void parsedTableReferencesCreateLineageAndNamesAloneDoNot() {
     StructuralParser parser = new StructuralParser();
     LlmGateway gateway = mock(LlmGateway.class);
