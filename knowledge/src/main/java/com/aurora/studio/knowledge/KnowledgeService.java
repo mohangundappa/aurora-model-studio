@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -151,6 +152,18 @@ public class KnowledgeService {
       throw new KnowledgeNotFoundException(id);
     }
     List<KnowledgeEvidence> evidence = repository.evidence(id);
+    List<KnowledgeRelationship> relationships = repository.relationships(id);
+    List<KnowledgeObject> implementations =
+        relationships.stream()
+            .filter(relationship -> relationship.relationshipType().name().equals("IMPLEMENTED_BY"))
+            .map(
+                relationship ->
+                    relationship.fromObjectId().equals(id)
+                        ? relationship.toObjectId()
+                        : relationship.fromObjectId())
+            .map(repository::findById)
+            .flatMap(Optional::stream)
+            .toList();
     List<String> warnings =
         repository.conflicts(id).stream()
             .filter(conflict -> conflict.status().name().equals("OPEN"))
@@ -165,9 +178,9 @@ public class KnowledgeService {
         object.name(),
         object.businessDescription(),
         object.attributes(),
-        List.of(),
+        implementations,
         evidence,
-        repository.relationships(id),
+        relationships,
         null,
         List.of(),
         object.confidence(),

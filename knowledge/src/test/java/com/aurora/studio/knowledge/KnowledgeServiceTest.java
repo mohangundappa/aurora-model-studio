@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.aurora.studio.common.ClientContext;
 import com.aurora.studio.common.KnowledgeType;
+import com.aurora.studio.common.RelationshipType;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -178,6 +179,59 @@ class KnowledgeServiceTest {
             any(),
             any(),
             any());
+  }
+
+  @Test
+  void resolvesImplementedByObjectsInKnowledgePackage() {
+    UUID featureId = UUID.randomUUID();
+    UUID implementationId = UUID.randomUUID();
+    KnowledgeObject feature = feature(featureId, Map.of());
+    KnowledgeObject implementation =
+        new KnowledgeObject(
+            implementationId,
+            ClientContext.require(),
+            "implementation:x",
+            1,
+            KnowledgeType.IMPLEMENTATION,
+            "X implementation",
+            "domain",
+            "use-case",
+            "description",
+            Map.of(),
+            Map.of(),
+            List.of(),
+            "EXTRACTED",
+            null,
+            null,
+            0.7,
+            Map.of(),
+            Map.of(),
+            "actor",
+            null,
+            null,
+            null,
+            Map.of(
+                "languageOrKind", "java",
+                "sourceTraceability", "src/X.java"),
+            false);
+    when(repository.findById(featureId)).thenReturn(Optional.of(feature));
+    when(repository.evidence(featureId)).thenReturn(List.of());
+    when(repository.conflicts(featureId)).thenReturn(List.of());
+    when(repository.relationships(featureId))
+        .thenReturn(
+            List.of(
+                new KnowledgeRelationship(
+                    UUID.randomUUID(),
+                    ClientContext.require(),
+                    featureId,
+                    RelationshipType.IMPLEMENTED_BY,
+                    implementationId,
+                    null)));
+    when(repository.findById(implementationId)).thenReturn(Optional.of(implementation));
+
+    KnowledgePackage result = service.get(featureId, true);
+
+    assertThat(result.implementations()).containsExactly(implementation);
   }
 
   private KnowledgeObject feature(UUID id, Map<String, Object> attributes) {
