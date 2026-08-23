@@ -93,6 +93,48 @@ class HttpAuroraCandidateClientTest {
   }
 
   @Test
+  void classifiesAuthenticationResponsesAsRejectedWithStatus() throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    try {
+      server.createContext(
+          "/api/models/model/candidates",
+          exchange -> {
+            exchange.sendResponseHeaders(401, 0);
+            exchange.close();
+          });
+      server.createContext(
+          "/api/models/unconfigured/candidates",
+          exchange -> {
+            exchange.sendResponseHeaders(503, 0);
+            exchange.close();
+          });
+      server.start();
+
+      HttpAuroraCandidateClient client =
+          new HttpAuroraCandidateClient(
+              new ObjectMapper(),
+              "http://localhost:" + server.getAddress().getPort(),
+              "studio-token");
+
+      AuroraCandidateClient.Registration unauthorized =
+          client.register("model", Map.of("packageHash", "package-hash"), "package-hash");
+
+      assertThat(unauthorized.successful()).isFalse();
+      assertThat(unauthorized.responseStatus()).isEqualTo(401);
+      assertThat(unauthorized.failureCode()).isEqualTo("AURORA_REJECTED");
+
+      AuroraCandidateClient.Registration unavailable =
+          client.register("unconfigured", Map.of("packageHash", "package-hash"), "package-hash");
+
+      assertThat(unavailable.successful()).isFalse();
+      assertThat(unavailable.responseStatus()).isEqualTo(503);
+      assertThat(unavailable.failureCode()).isEqualTo("AURORA_REJECTED");
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
   void refusesAnonymousRegistrationWhenTokenIsNotConfigured() {
     HttpAuroraCandidateClient client =
         new HttpAuroraCandidateClient(new ObjectMapper(), "http://127.0.0.1:1", "");

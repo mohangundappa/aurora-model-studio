@@ -37,7 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class InitiativeService {
-  private static final String AGENT = "initiative-orchestrator";
+  private static final String AGENT = InitiativeActors.ORCHESTRATOR;
   private static final Set<InitiativeStage> GATED_STAGES =
       EnumSet.of(
           InitiativeStage.REUSE_DECISION,
@@ -325,8 +325,7 @@ public class InitiativeService {
     }
     validateGateText("actor", request.actor());
     if (request.reason() != null) validateGateText("reason", request.reason());
-    if (request.actor().toLowerCase().contains("agent")
-        || request.actor().toLowerCase().contains("orchestrator")) {
+    if (InitiativeActors.isMachineIdentity(request.actor())) {
       throw new ValidationException("agent identities cannot approve human-gated stages");
     }
     String decision = request.decision() == null ? "" : request.decision().trim().toUpperCase();

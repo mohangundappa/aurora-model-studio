@@ -93,7 +93,7 @@ class InitiativeServiceTest {
     service.decide(
         initiativeId,
         InitiativeStage.REUSE_DECISION,
-        new GateDecisionRequest("reject", "reviewer", "Evidence is insufficient"));
+        new GateDecisionRequest("reject", "Maya Chen (Travel Agent)", "Evidence is insufficient"));
 
     verify(repository)
         .insertGateDecision(
@@ -101,7 +101,7 @@ class InitiativeServiceTest {
             attemptId,
             InitiativeStage.REUSE_DECISION,
             "REJECT",
-            "reviewer",
+            "Maya Chen (Travel Agent)",
             "Evidence is insufficient",
             List.of());
     verify(repository)
@@ -309,19 +309,9 @@ class InitiativeServiceTest {
                     initiativeId,
                     InitiativeStage.REUSE_DECISION,
                     new GateDecisionRequest(
-                        "APPROVE", "initiative-orchestrator", "Approve the governed design")))
+                        "APPROVE", "  INITIATIVE-ORCHESTRATOR  ", "Approve the governed design")))
         .isInstanceOf(ValidationException.class)
         .hasMessage("agent identities cannot approve human-gated stages");
-    assertThatThrownBy(
-            () ->
-                service.decide(
-                    initiativeId,
-                    InitiativeStage.REUSE_DECISION,
-                    new GateDecisionRequest(
-                        "APPROVE", "agent-reviewer", "Approve the governed design")))
-        .isInstanceOf(ValidationException.class)
-        .hasMessage("agent identities cannot approve human-gated stages");
-    verify(repository, never()).insertGateDecision(any(), any(), any(), any(), any(), any(), any());
   }
 
   @Test

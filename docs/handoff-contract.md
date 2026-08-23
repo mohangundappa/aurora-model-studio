@@ -16,6 +16,15 @@ POST /api/models/{name}/candidates
 → 201 { candidateId, status: "AWAITING_WEIGHTS" }
 ```
 
+Candidate writes with a missing or incorrect `X-Aurora-Studio-Token` return
+`401 {"error": ...}`. If Aurora has no token configured, it fails closed with
+`503 {"error": ...}`. Malformed request JSON returns
+`400 {"error":"request body must be valid JSON"}`. The responses never reveal
+the configured token. `HttpAuroraCandidateClient` records both `401` and `503`
+provider responses as `AURORA_REJECTED`, preserving the HTTP status in the
+attempt record; a missing local outbound token is instead
+`AURORA_NOT_CONFIGURED` and no anonymous request is made.
+
 The package is immutable, deterministically serialized, SHA-256 hashed, and
 uses that hash as the idempotency key. The hash covers the package fields
 except the transport envelope fields `studioInitiativeId` and `packageHash`;

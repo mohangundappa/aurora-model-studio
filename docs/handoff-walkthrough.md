@@ -492,3 +492,10 @@ walkthrough. In the live check, the attempt summary was:
   ]
 }
 ```
+
+If Aurora receives a candidate POST without the shared token or with the wrong
+token, it returns HTTP `401` with the same `{"error": ...}` shape. If Aurora's
+server-side token is not configured, it returns HTTP `503`; neither response
+reveals the expected token. Model Studio records either remote response as
+`AURORA_REJECTED` with the HTTP status, while a missing local outbound token
+remains `AURORA_NOT_CONFIGURED` and makes no request.
