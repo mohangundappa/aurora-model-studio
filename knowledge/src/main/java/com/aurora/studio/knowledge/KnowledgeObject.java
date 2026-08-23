@@ -25,6 +25,7 @@ public record KnowledgeObject(
     double confidence,
     Map<String, Object> confidenceBreakdown,
     Map<String, Object> qualityAssessment,
+    UUID llmInvocationId,
     String extractedBy,
     String reviewedBy,
     String approvedBy,

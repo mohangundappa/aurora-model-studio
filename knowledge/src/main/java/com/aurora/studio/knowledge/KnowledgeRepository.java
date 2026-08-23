@@ -187,6 +187,45 @@ public class KnowledgeRepository {
         certainty);
   }
 
+  public void linkInvocation(UUID objectId, UUID invocationId) {
+    jdbc.update(
+        "update knowledge_objects set llm_invocation_id=? where client_id=? and id=?",
+        invocationId,
+        ClientContext.require(),
+        objectId);
+  }
+
+  public void saveFieldProvenance(FieldProvenance field) {
+    jdbc.update(
+        "insert into knowledge_field_provenance(client_id,knowledge_object_id,field_name,field_value,provenance,citation_evidence_id,citation_excerpt,extraction_certainty) values(?,?,?,?::jsonb,?,?,?,?)",
+        ClientContext.require(),
+        field.knowledgeObjectId(),
+        field.fieldName(),
+        json(field.fieldValue()),
+        field.provenance(),
+        field.citationEvidenceId(),
+        field.citationExcerpt(),
+        field.extractionCertainty());
+  }
+
+  public List<FieldProvenance> fieldProvenance(UUID objectId) {
+    return jdbc.query(
+        "select * from knowledge_field_provenance where client_id=? and knowledge_object_id=? order by created_at",
+        (rs, row) ->
+            new FieldProvenance(
+                rs.getObject("id", UUID.class),
+                rs.getObject("client_id", UUID.class),
+                rs.getObject("knowledge_object_id", UUID.class),
+                rs.getString("field_name"),
+                readObject(rs.getString("field_value")),
+                rs.getString("provenance"),
+                rs.getObject("citation_evidence_id", UUID.class),
+                rs.getString("citation_excerpt"),
+                rs.getDouble("extraction_certainty")),
+        ClientContext.require(),
+        objectId);
+  }
+
   public List<KnowledgeRelationship> relationships(UUID objectId) {
     return jdbc.query(
         "select * from knowledge_relationships where client_id=? and (from_object_id=? or to_object_id=?)",
@@ -251,6 +290,7 @@ public class KnowledgeRepository {
         rs.getDouble("confidence"),
         readMap(rs.getString("confidence_breakdown")),
         readMap(rs.getString("quality_assessment")),
+        rs.getObject("llm_invocation_id", UUID.class),
         rs.getString("extracted_by"),
         rs.getString("reviewed_by"),
         rs.getString("approved_by"),
@@ -268,6 +308,14 @@ public class KnowledgeRepository {
   private Map<String, Object> readMap(String value) {
     try {
       return mapper.readValue(value, Map.class);
+    } catch (JsonProcessingException exception) {
+      throw new IllegalStateException("invalid knowledge json", exception);
+    }
+  }
+
+  private Object readObject(String value) {
+    try {
+      return mapper.readValue(value, Object.class);
     } catch (JsonProcessingException exception) {
       throw new IllegalStateException("invalid knowledge json", exception);
     }
