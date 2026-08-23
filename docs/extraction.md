@@ -2,8 +2,14 @@
 
 Extraction has two ordered passes.
 
-1. The deterministic structural pass reads SQL migrations, YAML definitions,
-   Java calculators, and Markdown documents. It records identifiers, inputs,
+1. The deterministic structural pass reads only declared roots and patterns:
+   signal definitions, calculator implementations, the decision policy,
+   experiment definitions, the model registry migration, and two curated
+   documents. Missing declared roots fail the run. Hard exclusions for
+   `node_modules`, `.git`, build output, lockfiles, generated sources, and
+   `.github/workflows` apply even when a root is broad. Files must match a
+   supported shape; extension alone never creates knowledge. Skips are counted
+   in the extraction run summary. The pass records identifiers, inputs,
    windows, types, referenced tables/columns, file paths, commit/content hashes,
    and bounded evidence excerpts without using a model.
 2. The interpretation pass receives those facts and excerpts in a constrained
@@ -23,6 +29,15 @@ weights renormalized.
 Provider refusals, transport failures, and schema-invalid responses create no
 candidate, but the invocation outcome is recorded. A model-assisted candidate
 references its producing invocation. Approved objects are never overwritten.
+
+Extraction uses the importer’s logical keys for recognized Aurora artifacts
+(`feature:<name>`, `implementation:calculator:<name>`,
+`implementation:decision-policy`, and `model:<name>:<version>`). Other
+recognized artifacts use a stable kind-plus-relative-path identity. Before
+interpretation, the source commit and content hash are compared with evidence
+already stored for that key. Unchanged reruns create no object; a changed
+source creates one new version and preserves the old version. Duplicate logical
+keys in a single run are suppressed.
 
 The synthetic legacy estate is separate from Aurora Intelligence backfill. Its
 objects carry `synthetic=true` in storage and in retrieval packages, and runs

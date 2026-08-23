@@ -44,6 +44,8 @@ public class ImporterCommand implements CommandLineRunner {
           System.out.println(
               "Extracted Aurora estate: synthetic=false candidates="
                   + result.candidateIds().size()
+                  + " skipped="
+                  + result.skippedArtifacts()
                   + " counts="
                   + result.counts());
         }
@@ -52,6 +54,8 @@ public class ImporterCommand implements CommandLineRunner {
           System.out.println(
               "Extracted synthetic estate: synthetic=true candidates="
                   + result.candidateIds().size()
+                  + " skipped="
+                  + result.skippedArtifacts()
                   + " counts="
                   + result.counts());
         }

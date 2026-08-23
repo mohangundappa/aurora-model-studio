@@ -13,6 +13,7 @@ import com.aurora.studio.knowledge.KnowledgeObject;
 import com.aurora.studio.knowledge.KnowledgeRepository;
 import com.aurora.studio.knowledge.KnowledgeService;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -84,14 +85,30 @@ public class ExtractionService {
   }
 
   public ExtractionRun extract(Path root, boolean synthetic) throws IOException {
-    return extractArtifacts(parser.parse(root), synthetic);
+    StructuralParser.ParseResult parsed =
+        parser.parseResult(root, ExtractionSourceSelection.auroraDefaults());
+    return extractArtifacts(
+        parsed.artifacts(), synthetic, parsed.skippedArtifacts(), currentCommit(root));
   }
 
   @Transactional
   public ExtractionRun extractArtifacts(List<Artifact> artifacts, boolean synthetic) {
+    return extractArtifacts(artifacts, synthetic, 0, "unresolved");
+  }
+
+  @Transactional
+  private ExtractionRun extractArtifacts(
+      List<Artifact> artifacts, boolean synthetic, int skippedArtifacts, String revision) {
     Map<String, Integer> counts = new LinkedHashMap<>();
     List<UUID> candidates = new ArrayList<>();
+    java.util.Set<String> seenKeys = new java.util.HashSet<>();
     for (Artifact artifact : artifacts) {
+      String sourceVersion = revision + ":" + artifact.structuralFact().sourceHash();
+      if (!seenKeys.add(artifact.knowledgeKey())
+          || repository.hasEvidence(artifact.knowledgeKey(), sourceVersion)) {
+        skippedArtifacts++;
+        continue;
+      }
       ExtractionCandidate candidate = interpret(artifact, synthetic);
       if (candidate == null) continue;
       KnowledgeObject object =
@@ -99,12 +116,15 @@ public class ExtractionService {
               candidate.draft(), "extraction-runner", candidate.result().invocationId());
       KnowledgeEvidence evidence =
           knowledgeEvidence(
-              object, artifact, synthetic ? "synthetic-legacy-estate" : "aurora-estate");
+              object,
+              artifact,
+              synthetic ? "synthetic-legacy-estate" : "aurora-estate",
+              sourceVersion);
       persistProvenance(object, evidence, candidate.fields());
       candidates.add(object.id());
       counts.merge(object.knowledgeType().name(), 1, Integer::sum);
     }
-    return new ExtractionRun(counts, candidates, synthetic);
+    return new ExtractionRun(counts, candidates, synthetic, skippedArtifacts);
   }
 
   public ExtractionRun extractSyntheticEstate() {
@@ -155,10 +175,7 @@ public class ExtractionService {
     for (ExtractedField field : fields) attributes.put(field.field(), field.value());
     KnowledgeService.Draft draft =
         new KnowledgeService.Draft(
-            "extracted:"
-                + artifact.structuralFact().kind().toLowerCase()
-                + ":"
-                + artifact.structuralFact().name(),
+            artifact.knowledgeKey(),
             type,
             artifact.structuralFact().name(),
             "hotel model development",
@@ -255,13 +272,13 @@ public class ExtractionService {
   }
 
   private KnowledgeEvidence knowledgeEvidence(
-      KnowledgeObject object, Artifact artifact, String source) {
+      KnowledgeObject object, Artifact artifact, String source, String sourceVersion) {
     return knowledge.addEvidence(
         object.id(),
         source,
-        "document",
+        "source-file",
         artifact.structuralFact().sourcePath(),
-        artifact.structuralFact().sourceHash(),
+        sourceVersion,
         artifact.excerpt(),
         1.0);
   }
@@ -297,6 +314,21 @@ public class ExtractionService {
   private record ExtractionCandidate(
       KnowledgeService.Draft draft, LlmResult result, List<ExtractedField> fields) {}
 
+  private String currentCommit(Path root) throws IOException {
+    try {
+      Process process =
+          new ProcessBuilder("git", "-C", root.toString(), "rev-parse", "HEAD").start();
+      String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+      if (process.waitFor() == 0 && !output.isBlank()) return output.trim();
+    } catch (InterruptedException exception) {
+      Thread.currentThread().interrupt();
+    }
+    return "unresolved";
+  }
+
   public record ExtractionRun(
-      Map<String, Integer> counts, List<UUID> candidateIds, boolean synthetic) {}
+      Map<String, Integer> counts,
+      List<UUID> candidateIds,
+      boolean synthetic,
+      int skippedArtifacts) {}
 }

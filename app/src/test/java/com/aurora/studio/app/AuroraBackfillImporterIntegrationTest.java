@@ -3,6 +3,7 @@ package com.aurora.studio.app;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.aurora.studio.common.ClientContext;
+import com.aurora.studio.extraction.ExtractionService;
 import com.aurora.studio.importer.AuroraBackfillImporter;
 import java.net.URI;
 import java.nio.file.Files;
@@ -38,6 +39,7 @@ class AuroraBackfillImporterIntegrationTest {
           .withPassword("aurora");
 
   @Autowired AuroraBackfillImporter importer;
+  @Autowired ExtractionService extraction;
   @Autowired JdbcTemplate jdbc;
 
   @DynamicPropertySource
@@ -102,6 +104,40 @@ class AuroraBackfillImporterIntegrationTest {
                 CLIENT,
                 "feature:booking-intent"))
         .isEqualTo(1);
+  }
+
+  @Test
+  void extractionIsConvergentAndUsesImporterKeys(@TempDir Path temp) throws Exception {
+    Path fixture = copyFixture(temp);
+    importer.importRepository(fixture);
+
+    ClientContext.set(CLIENT);
+    try {
+      ExtractionService.ExtractionRun first = extraction.extract(fixture, false);
+      assertThat(first.counts()).containsEntry("EXPERIMENT", 1);
+      assertThat(first.candidateIds()).hasSize(1);
+      assertThat(first.skippedArtifacts()).isGreaterThan(0);
+
+      ExtractionService.ExtractionRun second = extraction.extract(fixture, false);
+      assertThat(second.counts()).isEmpty();
+      assertThat(second.candidateIds()).isEmpty();
+
+      Path changed =
+          fixture.resolve(
+              "experiments/src/main/resources/experiments/destination-experience-v1.yaml");
+      Files.writeString(changed, Files.readString(changed) + "\nchanged: true\n");
+      ExtractionService.ExtractionRun third = extraction.extract(fixture, false);
+      assertThat(third.counts()).containsEntry("EXPERIMENT", 1);
+      assertThat(
+              jdbc.queryForObject(
+                  "select count(*) from knowledge_objects where client_id=? and knowledge_key=?",
+                  Integer.class,
+                  CLIENT,
+                  "experiment:experiments/src/main/resources/experiments/destination-experience-v1.yaml"))
+          .isEqualTo(2);
+    } finally {
+      ClientContext.clear();
+    }
   }
 
   private int countObjects() {
