@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: aurora_studio
+      POSTGRES_USER: aurora
+      POSTGRES_PASSWORD: aurora
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aurora -d aurora_studio"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  app:
+    build:
+      context: .
+      args:
+        MAVEN_MIRROR_URL: ${MAVEN_MIRROR_URL:-}
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/aurora_studio
+      SPRING_DATASOURCE_USERNAME: aurora
+      SPRING_DATASOURCE_PASSWORD: aurora
+    depends_on:
+      postgres:
+        condition: service_healthy
