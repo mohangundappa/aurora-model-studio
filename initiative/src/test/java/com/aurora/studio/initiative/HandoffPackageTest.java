@@ -33,4 +33,26 @@ class HandoffPackageTest {
     assertThatThrownBy(() -> ((List<?>) first.content().get("features")).clear())
         .isInstanceOf(UnsupportedOperationException.class);
   }
+
+  @Test
+  void hashSurvivesJsonRoundTripOfRecordValues() {
+    ObjectMapper mapper = new ObjectMapper();
+    Map<String, Object> content =
+        Map.of(
+            "feasibility",
+            Map.of(
+                "checks",
+                List.of(
+                    new FeasibilityCheck(
+                        "feature:booking-intent",
+                        "PASS",
+                        java.util.UUID.randomUUID(),
+                        "Feature is visible"))));
+
+    HandoffPackage original = HandoffPackage.create(mapper, content);
+    Map<String, Object> roundTripped =
+        mapper.convertValue(mapper.valueToTree(original.content()), Map.class);
+
+    assertThat(HandoffPackage.create(mapper, roundTripped).hash()).isEqualTo(original.hash());
+  }
 }

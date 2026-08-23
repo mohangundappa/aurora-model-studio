@@ -24,6 +24,7 @@ services:
       SPRING_DATASOURCE_USERNAME: aurora
       SPRING_DATASOURCE_PASSWORD: aurora
       STUDIO_HANDOFF_AURORA_BASE_URL: ${STUDIO_HANDOFF_AURORA_BASE_URL:-http://host.docker.internal:8080}
+      STUDIO_HANDOFF_AURORA_TOKEN: ${STUDIO_HANDOFF_AURORA_TOKEN:-aurora-model-studio-demo-token}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

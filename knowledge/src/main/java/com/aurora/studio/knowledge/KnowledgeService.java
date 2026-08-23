@@ -79,6 +79,7 @@ public class KnowledgeService {
 
   @Transactional
   public KnowledgeObject create(Draft draft, String actor) {
+    requireActor(actor);
     return create(draft, actor, true);
   }
 
@@ -130,6 +131,7 @@ public class KnowledgeService {
 
   @Transactional
   public KnowledgeObject submitForReview(UUID id, String actor, String comment) {
+    requireActor(actor);
     KnowledgeObject object = require(id);
     transition(object, "EXTRACTED", "PENDING_REVIEW");
     audit(object.id(), "EXTRACTED", "PENDING_REVIEW", actor, comment);
@@ -138,6 +140,7 @@ public class KnowledgeService {
 
   @Transactional
   public KnowledgeObject approve(UUID id, String actor, String comment) {
+    requireActor(actor);
     KnowledgeObject object = require(id);
     if (!object.lifecycleStatus().equals("PENDING_REVIEW")) {
       throw conflict(object, "PENDING_REVIEW", "APPROVED");
@@ -180,6 +183,7 @@ public class KnowledgeService {
 
   @Transactional
   public KnowledgeObject deprecate(UUID id, String actor, String comment) {
+    requireActor(actor);
     KnowledgeObject object = require(id);
     if (!List.of("APPROVED", "PENDING_REVIEW").contains(object.lifecycleStatus())) {
       throw conflict(object, object.lifecycleStatus(), "DEPRECATED");
@@ -190,6 +194,12 @@ public class KnowledgeService {
         id);
     audit(id, object.lifecycleStatus(), "DEPRECATED", actor, comment);
     return repository.findById(id).orElseThrow();
+  }
+
+  private void requireActor(String actor) {
+    if (actor == null || actor.isBlank()) {
+      throw new ValidationException("actor is required");
+    }
   }
 
   public List<KnowledgeObject> search(

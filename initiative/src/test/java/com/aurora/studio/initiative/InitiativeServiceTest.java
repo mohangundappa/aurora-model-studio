@@ -93,7 +93,7 @@ class InitiativeServiceTest {
     service.decide(
         initiativeId,
         InitiativeStage.REUSE_DECISION,
-        new GateDecisionRequest("reject", "reviewer", "Evidence is insufficient"));
+        new GateDecisionRequest("reject", "Maya Chen (Travel Agent)", "Evidence is insufficient"));
 
     verify(repository)
         .insertGateDecision(
@@ -101,7 +101,7 @@ class InitiativeServiceTest {
             attemptId,
             InitiativeStage.REUSE_DECISION,
             "REJECT",
-            "reviewer",
+            "Maya Chen (Travel Agent)",
             "Evidence is insufficient",
             List.of());
     verify(repository)
@@ -274,6 +274,44 @@ class InitiativeServiceTest {
         .isInstanceOf(ValidationException.class)
         .hasMessageContaining("actor");
     verify(repository, never()).insertGateDecision(any(), any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void approvingGateRequiresReasonAndHumanActor() {
+    InitiativeRepository.Attempt awaiting =
+        new InitiativeRepository.Attempt(
+            attemptId,
+            InitiativeStage.REUSE_DECISION,
+            1,
+            StageStatus.AWAITING_APPROVAL,
+            Instant.now().minusSeconds(2),
+            Instant.now().minusSeconds(1),
+            7,
+            0,
+            List.of(),
+            List.of(),
+            List.of());
+    when(repository.find(initiativeId)).thenReturn(Optional.of(base()));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.REUSE_DECISION))
+        .thenReturn(Optional.of(awaiting));
+
+    assertThatThrownBy(
+            () ->
+                service.decide(
+                    initiativeId,
+                    InitiativeStage.REUSE_DECISION,
+                    new GateDecisionRequest("APPROVE", "Maya Chen", "")))
+        .isInstanceOf(ValidationException.class)
+        .hasMessage("reason is required for every gate decision");
+    assertThatThrownBy(
+            () ->
+                service.decide(
+                    initiativeId,
+                    InitiativeStage.REUSE_DECISION,
+                    new GateDecisionRequest(
+                        "APPROVE", "  INITIATIVE-ORCHESTRATOR  ", "Approve the governed design")))
+        .isInstanceOf(ValidationException.class)
+        .hasMessage("agent identities cannot approve human-gated stages");
   }
 
   @Test

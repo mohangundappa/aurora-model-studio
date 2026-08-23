@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import com.aurora.studio.common.ClientContext;
 import com.aurora.studio.common.KnowledgeType;
 import com.aurora.studio.common.RelationshipType;
+import com.aurora.studio.common.ValidationException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
@@ -618,6 +619,9 @@ class KnowledgeServiceTest {
         .containsExactly(candidate);
     assertThatThrownBy(() -> service.get(id, false)).isInstanceOf(KnowledgeNotFoundException.class);
 
+    assertThatThrownBy(() -> service.approve(id, " ", "Approve"))
+        .isInstanceOf(ValidationException.class)
+        .hasMessage("actor is required");
     service.submitForReview(id, "human-reviewer", "Review generated hypothesis");
     current.set(pending);
     when(repository.evidence(id)).thenReturn(List.of());

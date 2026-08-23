@@ -39,13 +39,15 @@ Linux host-gateway mapping and makes the URL overridable:
 
 ```yaml
 STUDIO_HANDOFF_AURORA_BASE_URL: ${STUDIO_HANDOFF_AURORA_BASE_URL:-http://host.docker.internal:8080}
+STUDIO_HANDOFF_AURORA_TOKEN: ${STUDIO_HANDOFF_AURORA_TOKEN:-aurora-model-studio-demo-token}
 extra_hosts:
   - "host.docker.internal:host-gateway"
 ```
 
 The default favors the topology used here: Model Studio in Compose and Aurora
 on the host. Set `STUDIO_HANDOFF_AURORA_BASE_URL` when both services run in a
-different network topology.
+different network topology. The demo token must match Aurora's
+`AURORA_CANDIDATES_STUDIO_TOKEN`; it protects the candidate write seam only.
 
 Set the API variables and confirm the application:
 
@@ -99,7 +101,7 @@ curl -sS -H "X-Aurora-Client: $C" "$API/api/initiatives/$REUSE_ID" |
 Observed output:
 
 ```text
-REUSE_ID=ce4611fc-67de-4d8b-bd2a-51e6f51dac33
+REUSE_ID=9f02763e-6079-408e-9b4b-5bcb17f66b60
 ```
 
 ```json
@@ -170,12 +172,12 @@ Observed output:
 
 ```json
 {
-  "id": "59d25e93-32c2-4aca-928d-8b1961fcb2aa",
+  "id": "1bd17af3-808b-42c0-a9ce-ca784bd8d532",
   "knowledgeKey": "feature:generated:recent-session-engagement",
   "lifecycleStatus": "PENDING_REVIEW"
 }
 {
-  "id": "59d25e93-32c2-4aca-928d-8b1961fcb2aa",
+  "id": "1bd17af3-808b-42c0-a9ce-ca784bd8d532",
   "knowledgeKey": "feature:generated:recent-session-engagement",
   "lifecycleStatus": "APPROVED",
   "approvedBy": "Maya Chen",
@@ -216,7 +218,7 @@ Observed output:
     "artifacts": [
       {
         "type": "HANDOFF_PACKAGE",
-        "id": "336e8087-9eb1-4677-8394-ffdf98bb9eda",
+        "id": "26bcf6a0-7209-4d8c-9c41-94a6162d3126",
         "synthetic": false
       }
     ]
@@ -250,13 +252,13 @@ Observed output:
     "blockers": [],
     "handoffAttempts": [
       {
-        "packageHash": "34060a2f388ea20be4bb549c2acfdfb967d5f081d4826ac99da9418794813bbd",
+        "packageHash": "e6a9bf2d7645cd6974c1bd6af24b707e674ff04e94e87fea09ae6716f9b5ac2b",
         "responseStatus": 201,
-        "candidateId": "f113e91b-4ace-4425-a5f8-44ee0f337f37",
+        "candidateId": "06b4605f-951f-4e82-a580-7d36ba657bae",
         "candidateStatus": "AWAITING_WEIGHTS",
         "outcome": "REGISTERED",
         "failureCode": null,
-        "requestSummaryPackageHash": "34060a2f388ea20be4bb549c2acfdfb967d5f081d4826ac99da9418794813bbd"
+        "requestSummaryPackageHash": "e6a9bf2d7645cd6974c1bd6af24b707e674ff04e94e87fea09ae6716f9b5ac2b"
       }
     ]
   }
@@ -291,17 +293,17 @@ Observed output:
 ```json
 [
   {
-    "packageHash": "34060a2f388ea20be4bb549c2acfdfb967d5f081d4826ac99da9418794813bbd",
+    "packageHash": "e6a9bf2d7645cd6974c1bd6af24b707e674ff04e94e87fea09ae6716f9b5ac2b",
     "responseStatus": 201,
-    "candidateId": "f113e91b-4ace-4425-a5f8-44ee0f337f37",
+    "candidateId": "06b4605f-951f-4e82-a580-7d36ba657bae",
     "candidateStatus": "AWAITING_WEIGHTS",
     "outcome": "REGISTERED",
     "failureCode": null
   },
   {
-    "packageHash": "34060a2f388ea20be4bb549c2acfdfb967d5f081d4826ac99da9418794813bbd",
+    "packageHash": "e6a9bf2d7645cd6974c1bd6af24b707e674ff04e94e87fea09ae6716f9b5ac2b",
     "responseStatus": 201,
-    "candidateId": "f113e91b-4ace-4425-a5f8-44ee0f337f37",
+    "candidateId": "06b4605f-951f-4e82-a580-7d36ba657bae",
     "candidateStatus": "AWAITING_WEIGHTS",
     "outcome": "REGISTERED",
     "failureCode": null
@@ -333,11 +335,11 @@ Observed output:
 ```json
 [
   {
-    "candidateId": "f113e91b-4ace-4425-a5f8-44ee0f337f37",
+    "candidateId": "06b4605f-951f-4e82-a580-7d36ba657bae",
     "modelName": "booking-intent",
-    "packageHash": "34060a2f388ea20be4bb549c2acfdfb967d5f081d4826ac99da9418794813bbd",
-    "studioInitiativeId": "ce4611fc-67de-4d8b-bd2a-51e6f51dac33",
-    "requirementId": "6471de87-81fd-43f4-9b86-a6bfaa6e03ab",
+    "packageHash": "e6a9bf2d7645cd6974c1bd6af24b707e674ff04e94e87fea09ae6716f9b5ac2b",
+    "studioInitiativeId": "9f02763e-6079-408e-9b4b-5bcb17f66b60",
+    "requirementId": "4aced7ef-0e6c-4e87-8217-b6cb70456d0b",
     "status": "AWAITING_WEIGHTS",
     "notIncluded": [
       "trained model",
@@ -439,7 +441,7 @@ Observed output:
   "status": "PROVIDER_FAILED",
   "handoffAttempts": [
     {
-      "packageHash": "34060a2f388ea20be4bb549c2acfdfb967d5f081d4826ac99da9418794813bbd",
+      "packageHash": "e6a9bf2d7645cd6974c1bd6af24b707e674ff04e94e87fea09ae6716f9b5ac2b",
       "responseStatus": null,
       "candidateId": null,
       "candidateStatus": null,
@@ -469,3 +471,31 @@ Observed restored value:
 ```text
 http://host.docker.internal:8080
 ```
+
+If the token is missing, Model Studio does not attempt an anonymous POST. The
+persisted attempt is `PROVIDER_FAILED` with `failureCode` `AURORA_NOT_CONFIGURED`,
+no response status, and no candidate ID. Restore
+`STUDIO_HANDOFF_AURORA_TOKEN` to the documented demo value before the successful
+walkthrough. In the live check, the attempt summary was:
+
+```json
+{
+  "status": "PROVIDER_FAILED",
+  "handoffAttempts": [
+    {
+      "responseStatus": null,
+      "candidateId": null,
+      "outcome": "PROVIDER_FAILED",
+      "failureCode": "AURORA_NOT_CONFIGURED",
+      "failureMessage": "Aurora candidate registration failed"
+    }
+  ]
+}
+```
+
+If Aurora receives a candidate POST without the shared token or with the wrong
+token, it returns HTTP `401` with the same `{"error": ...}` shape. If Aurora's
+server-side token is not configured, it returns HTTP `503`; neither response
+reveals the expected token. Model Studio records either remote response as
+`AURORA_REJECTED` with the HTTP status, while a missing local outbound token
+remains `AURORA_NOT_CONFIGURED` and makes no request.

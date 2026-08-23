@@ -24,15 +24,14 @@ public class KnowledgeController {
 
   @PostMapping
   public KnowledgeObject create(
-      @RequestBody KnowledgeService.Draft draft,
-      @RequestParam(defaultValue = "local-demo-actor") String actor) {
+      @RequestBody KnowledgeService.Draft draft, @RequestParam(required = false) String actor) {
     return service.create(draft, actor);
   }
 
   @PostMapping("/{id}/submit-review")
   public KnowledgeObject submit(
       @PathVariable UUID id,
-      @RequestParam(defaultValue = "local-demo-actor") String actor,
+      @RequestParam(required = false) String actor,
       @RequestParam(required = false) String comment) {
     return service.submitForReview(id, actor, comment);
   }
@@ -40,7 +39,7 @@ public class KnowledgeController {
   @PostMapping("/{id}/approve")
   public KnowledgeObject approve(
       @PathVariable UUID id,
-      @RequestParam(defaultValue = "local-demo-actor") String actor,
+      @RequestParam(required = false) String actor,
       @RequestParam(required = false) String comment) {
     return service.approve(id, actor, comment);
   }
@@ -48,7 +47,7 @@ public class KnowledgeController {
   @PostMapping("/{id}/deprecate")
   public KnowledgeObject deprecate(
       @PathVariable UUID id,
-      @RequestParam(defaultValue = "local-demo-actor") String actor,
+      @RequestParam(required = false) String actor,
       @RequestParam(required = false) String comment) {
     return service.deprecate(id, actor, comment);
   }
