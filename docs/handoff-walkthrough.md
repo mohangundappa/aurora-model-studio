@@ -99,7 +99,7 @@ curl -sS -H "X-Aurora-Client: $C" "$API/api/initiatives/$REUSE_ID" |
 Observed output:
 
 ```text
-REUSE_ID=474133fd-92b1-4274-aa67-57ec7304b28c
+REUSE_ID=ce4611fc-67de-4d8b-bd2a-51e6f51dac33
 ```
 
 ```json
@@ -170,12 +170,12 @@ Observed output:
 
 ```json
 {
-  "id": "06868b67-bb20-4cd6-8903-9b6863253460",
+  "id": "59d25e93-32c2-4aca-928d-8b1961fcb2aa",
   "knowledgeKey": "feature:generated:recent-session-engagement",
   "lifecycleStatus": "PENDING_REVIEW"
 }
 {
-  "id": "06868b67-bb20-4cd6-8903-9b6863253460",
+  "id": "59d25e93-32c2-4aca-928d-8b1961fcb2aa",
   "knowledgeKey": "feature:generated:recent-session-engagement",
   "lifecycleStatus": "APPROVED",
   "approvedBy": "Maya Chen",
@@ -216,7 +216,7 @@ Observed output:
     "artifacts": [
       {
         "type": "HANDOFF_PACKAGE",
-        "id": "d0ed10b9-0420-49e0-a122-8142a84b1dc8",
+        "id": "336e8087-9eb1-4677-8394-ffdf98bb9eda",
         "synthetic": false
       }
     ]
@@ -250,13 +250,13 @@ Observed output:
     "blockers": [],
     "handoffAttempts": [
       {
-        "packageHash": "7056df823a6dac824bcf00316d8e2aa23ca84c8a5101eb83d1cf7cdc8ca5e9df",
+        "packageHash": "34060a2f388ea20be4bb549c2acfdfb967d5f081d4826ac99da9418794813bbd",
         "responseStatus": 201,
-        "candidateId": "0ea46ab0-a816-4fe2-b8a0-ceab76c40ba9",
+        "candidateId": "f113e91b-4ace-4425-a5f8-44ee0f337f37",
         "candidateStatus": "AWAITING_WEIGHTS",
         "outcome": "REGISTERED",
         "failureCode": null,
-        "requestSummaryPackageHash": "7056df823a6dac824bcf00316d8e2aa23ca84c8a5101eb83d1cf7cdc8ca5e9df"
+        "requestSummaryPackageHash": "34060a2f388ea20be4bb549c2acfdfb967d5f081d4826ac99da9418794813bbd"
       }
     ]
   }
@@ -291,17 +291,17 @@ Observed output:
 ```json
 [
   {
-    "packageHash": "7056df823a6dac824bcf00316d8e2aa23ca84c8a5101eb83d1cf7cdc8ca5e9df",
+    "packageHash": "34060a2f388ea20be4bb549c2acfdfb967d5f081d4826ac99da9418794813bbd",
     "responseStatus": 201,
-    "candidateId": "0ea46ab0-a816-4fe2-b8a0-ceab76c40ba9",
+    "candidateId": "f113e91b-4ace-4425-a5f8-44ee0f337f37",
     "candidateStatus": "AWAITING_WEIGHTS",
     "outcome": "REGISTERED",
     "failureCode": null
   },
   {
-    "packageHash": "7056df823a6dac824bcf00316d8e2aa23ca84c8a5101eb83d1cf7cdc8ca5e9df",
+    "packageHash": "34060a2f388ea20be4bb549c2acfdfb967d5f081d4826ac99da9418794813bbd",
     "responseStatus": 201,
-    "candidateId": "0ea46ab0-a816-4fe2-b8a0-ceab76c40ba9",
+    "candidateId": "f113e91b-4ace-4425-a5f8-44ee0f337f37",
     "candidateStatus": "AWAITING_WEIGHTS",
     "outcome": "REGISTERED",
     "failureCode": null
@@ -324,6 +324,7 @@ curl -sS http://localhost:8080/api/models/booking-intent/candidates |
   jq --arg id "$REUSE_ID" \
     'map(select(.studioInitiativeId==$id) |
       {candidateId,modelName,packageHash,studioInitiativeId,status,
+       requirementId:.packageContent.requirementId,
        notIncluded:.packageContent.notIncluded})'
 ```
 
@@ -332,10 +333,11 @@ Observed output:
 ```json
 [
   {
-    "candidateId": "0ea46ab0-a816-4fe2-b8a0-ceab76c40ba9",
+    "candidateId": "f113e91b-4ace-4425-a5f8-44ee0f337f37",
     "modelName": "booking-intent",
-    "packageHash": "7056df823a6dac824bcf00316d8e2aa23ca84c8a5101eb83d1cf7cdc8ca5e9df",
-    "studioInitiativeId": "474133fd-92b1-4274-aa67-57ec7304b28c",
+    "packageHash": "34060a2f388ea20be4bb549c2acfdfb967d5f081d4826ac99da9418794813bbd",
+    "studioInitiativeId": "ce4611fc-67de-4d8b-bd2a-51e6f51dac33",
+    "requirementId": "6471de87-81fd-43f4-9b86-a6bfaa6e03ab",
     "status": "AWAITING_WEIGHTS",
     "notIncluded": [
       "trained model",
@@ -437,7 +439,7 @@ Observed output:
   "status": "PROVIDER_FAILED",
   "handoffAttempts": [
     {
-      "packageHash": "7056df823a6dac824bcf00316d8e2aa23ca84c8a5101eb83d1cf7cdc8ca5e9df",
+      "packageHash": "34060a2f388ea20be4bb549c2acfdfb967d5f081d4826ac99da9418794813bbd",
       "responseStatus": null,
       "candidateId": null,
       "candidateStatus": null,

@@ -1081,6 +1081,7 @@ public class InitiativeService {
     return available.stream()
         .filter(object -> names.stream().anyMatch(name -> object.name().equalsIgnoreCase(name)))
         .sorted(
+            // Only approved knowledge is trusted; within that lifecycle choice, newest wins.
             Comparator.comparing(KnowledgeObject::knowledgeKey)
                 .thenComparingInt(object -> -featureLifecyclePriority(object.lifecycleStatus()))
                 .thenComparingInt(object -> -object.version()))
@@ -1131,6 +1132,7 @@ public class InitiativeService {
       }
     }
     Map<String, Object> content = new LinkedHashMap<>();
+    content.put("requirementId", base.requirementId().toString());
     content.put("modelName", modelName(requirement));
     content.put("declaredObservables", requirement.requiredObservables());
     content.put(
