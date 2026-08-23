@@ -53,6 +53,16 @@ api_get() {
   fi
 }
 
+api_post() {
+  local path="$1"
+  local body="$2"
+  if ! curl -fsS -X POST -H "X-Aurora-Client: $CLIENT" -H "Content-Type: application/json" \
+      -d "$body" "$API$path"; then
+    echo "Reset assertion failed: API request failed for POST $path" >&2
+    exit 1
+  fi
+}
+
 initiatives="$(api_get /api/initiatives)"
 if [[ "$(jq 'length' <<<"$initiatives")" != "2" ]]; then
   echo "Reset assertion failed: expected exactly two initiatives" >&2
@@ -123,6 +133,50 @@ if [[ "$(jq -r '.draftsRejected' <<<"$target_attempt")" -lt 1 ]] \
   exit 1
 fi
 
+experiment="$(
+  jq -c '[.stages[] | select(.stage == "EXPERIMENT_DESIGN")][0]' <<<"$reuse"
+)"
+if [[ "$(jq -r '.status' <<<"$experiment")" != "AWAITING_APPROVAL" ]]; then
+  echo "Reset assertion failed: reuse experiment design did not stop at AWAITING_APPROVAL" >&2
+  exit 1
+fi
+experiment_unknowns="$(
+  jq -c '[.attempts[-1].feasibilityChecks[] | select(.status == "UNKNOWN") | .name] | sort' \
+    <<<"$experiment"
+)"
+expected_experiment_unknowns='["minimum-exposures","sample-size-alpha","sample-size-baselineConversionRate","sample-size-minimumDetectableEffect","sample-size-power"]'
+if [[ "$experiment_unknowns" != "$expected_experiment_unknowns" ]]; then
+  echo "Reset assertion failed: experiment UNKNOWN checks were $experiment_unknowns" >&2
+  exit 1
+fi
+
+feasibility_unknowns="$(
+  jq -c '[.attempts[-1].feasibilityChecks[] | select(.status == "UNKNOWN") | .name]' \
+    <<<"$reuse_feasibility"
+)"
+api_post \
+  "/api/initiatives/$(jq -r '.id' <<<"$reuse")/stages/DATA_FEASIBILITY/decision" \
+  "$(jq -n --argjson checks "$feasibility_unknowns" \
+      '{decision:"APPROVE",actor:"reset-demo-human",reason:"Reset walkthrough acceptance; identity is unverified",acceptedUnknownChecks:$checks}')"
+api_post \
+  "/api/initiatives/$(jq -r '.id' <<<"$reuse")/stages/EXPERIMENT_DESIGN/decision" \
+  "$(jq -n --argjson checks "$experiment_unknowns" \
+      '{decision:"APPROVE",actor:"reset-demo-human",reason:"Reset walkthrough acceptance; identity is unverified",acceptedUnknownChecks:$checks}')"
+api_post \
+  "/api/initiatives/$(jq -r '.id' <<<"$reuse")/stages/HANDOFF/run" '{}'
+reuse_after="$(api_get "/api/initiatives/$(jq -r '.id' <<<"$reuse")")"
+handoff="$(jq -c '[.stages[] | select(.stage == "HANDOFF")][0]' <<<"$reuse_after")"
+if [[ "$(jq -r '.status' <<<"$handoff")" != "BLOCKED" ]] \
+    || ! jq -e '[.attempts[-1].blockers[] | select(startswith("FEATURE_NOT_APPROVED:"))] | length > 0' \
+      <<<"$handoff" >/dev/null; then
+  echo "Reset assertion failed: handoff was not refused for an unapproved generated feature" >&2
+  exit 1
+fi
+if jq -e '[.attempts[-1].handoffAttempts[]?] | length > 0' <<<"$handoff" >/dev/null; then
+  echo "Reset assertion failed: refused handoff created an outbound registration attempt" >&2
+  exit 1
+fi
+
 cancellation="$(
   jq -c '[.[] | select(((.requirement.requiredObservables // []) | index("BOOKING_CANCELLED")) != null)][0]' \
     <<<"$initiatives"
@@ -138,6 +192,12 @@ fi
 if [[ "$(jq -c '.blockers | sort' <<<"$cancellation")" \
     != '["MISSING_TARGET_OBSERVABLE:BOOKING_CANCELLED"]' ]]; then
   echo "Reset assertion failed: cancellation blocker is incorrect" >&2
+  exit 1
+fi
+if ! jq -e \
+    '[.attempts[-1].feasibilityChecks[] | select(.name == "observable:BOOKING_CANCELLED" and .status == "FAIL")] | length == 1' \
+    <<<"$cancellation_feasibility" >/dev/null; then
+  echo "Reset assertion failed: cancellation missing target observable check was not recorded" >&2
   exit 1
 fi
 

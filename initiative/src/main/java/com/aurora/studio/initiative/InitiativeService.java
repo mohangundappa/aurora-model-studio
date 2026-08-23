@@ -17,6 +17,7 @@ import com.aurora.studio.knowledge.KnowledgeObject;
 import com.aurora.studio.knowledge.KnowledgePackage;
 import com.aurora.studio.knowledge.KnowledgeRelationship;
 import com.aurora.studio.knowledge.KnowledgeService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -49,10 +50,20 @@ public class InitiativeService {
   private final DiscoveryService discovery;
   private final KnowledgeService knowledge;
   private final LlmGateway gateway;
+  private final AuroraCandidateClient aurora;
+  private final ObjectMapper mapper;
 
   public InitiativeService(
       InitiativeRepository repository, DiscoveryService discovery, KnowledgeService knowledge) {
-    this(repository, discovery, knowledge, null);
+    this(repository, discovery, knowledge, null, null, new ObjectMapper());
+  }
+
+  public InitiativeService(
+      InitiativeRepository repository,
+      DiscoveryService discovery,
+      KnowledgeService knowledge,
+      LlmGateway gateway) {
+    this(repository, discovery, knowledge, gateway, null, new ObjectMapper());
   }
 
   @Autowired
@@ -60,11 +71,15 @@ public class InitiativeService {
       InitiativeRepository repository,
       DiscoveryService discovery,
       KnowledgeService knowledge,
-      LlmGateway gateway) {
+      LlmGateway gateway,
+      AuroraCandidateClient aurora,
+      ObjectMapper mapper) {
     this.repository = repository;
     this.discovery = discovery;
     this.knowledge = knowledge;
     this.gateway = gateway;
+    this.aurora = aurora;
+    this.mapper = mapper;
   }
 
   @Transactional
@@ -196,6 +211,7 @@ public class InitiativeService {
       runStage(initiative.id(), InitiativeStage.TARGETING_DESIGN);
       runStage(initiative.id(), InitiativeStage.FEATURE_DESIGN);
       runStage(initiative.id(), InitiativeStage.DATA_FEASIBILITY);
+      runStage(initiative.id(), InitiativeStage.EXPERIMENT_DESIGN);
     }
     return get(initiative.id());
   }
@@ -216,7 +232,7 @@ public class InitiativeService {
       throw new IllegalStateException("Stage is already running or awaiting approval");
     }
     if (stage != InitiativeStage.REQUIREMENT_INTAKE) {
-      InitiativeStage predecessor = InitiativeStage.values()[stage.ordinal() - 1];
+      InitiativeStage predecessor = predecessor(stage);
       StageStatus predecessorStatus = latest(initiativeId, predecessor).status();
       if (predecessorStatus != StageStatus.COMPLETED) {
         throw new IllegalStateException(
@@ -262,6 +278,8 @@ public class InitiativeService {
         case DATA_FEASIBILITY -> finishFeasibility(base, current, started);
         case TARGETING_DESIGN -> finishTargeting(base, current, started);
         case FEATURE_DESIGN -> finishFeature(base, current, started);
+        case EXPERIMENT_DESIGN -> finishExperiment(base, current, started);
+        case HANDOFF -> awaitHandoff(base, current, started);
         case REQUIREMENT_INTAKE ->
             throw new IllegalStateException("Requirement intake is completed at creation");
         default -> throw new IllegalStateException("Stage " + stage + " is not implemented");
@@ -287,6 +305,14 @@ public class InitiativeService {
           List.of());
       throw exception;
     }
+  }
+
+  private InitiativeStage predecessor(InitiativeStage stage) {
+    return switch (stage) {
+      case EXPERIMENT_DESIGN -> InitiativeStage.FEATURE_DESIGN;
+      case HANDOFF -> InitiativeStage.EXPERIMENT_DESIGN;
+      default -> InitiativeStage.values()[stage.ordinal() - 1];
+    };
   }
 
   @Transactional
@@ -329,7 +355,8 @@ public class InitiativeService {
             : request.acceptedUnknownChecks().stream().distinct().sorted().toList();
     if ((stage == InitiativeStage.DATA_FEASIBILITY
             || stage == InitiativeStage.TARGETING_DESIGN
-            || stage == InitiativeStage.FEATURE_DESIGN)
+            || stage == InitiativeStage.FEATURE_DESIGN
+            || stage == InitiativeStage.EXPERIMENT_DESIGN)
         && !unknownChecks.isEmpty()) {
       List<String> expectedUnknownChecks = unknownChecks.stream().sorted().toList();
       if (decision.equals("APPROVE") && !acceptedUnknownChecks.equals(expectedUnknownChecks)) {
@@ -354,6 +381,9 @@ public class InitiativeService {
         request.actor(),
         request.reason(),
         acceptedUnknownChecks);
+    if (stage == InitiativeStage.HANDOFF && decision.equals("APPROVE")) {
+      return completeHandoff(initiativeId, require(initiativeId), current, request, now, wait);
+    }
     StageStatus next =
         switch (decision) {
           case "APPROVE" -> StageStatus.COMPLETED;
@@ -581,6 +611,650 @@ public class InitiativeService {
                 : "Data feasibility blocked",
         artifacts);
     return get(base.id());
+  }
+
+  private Initiative finishExperiment(
+      InitiativeRepository.Base base, InitiativeRepository.Attempt attempt, Instant started) {
+    ModelRequirement requirement = discovery.getRequirement(base.requirementId());
+    List<KnowledgeObject> visible = knowledge.search(null, null, null, null, null, null, true);
+    KnowledgeObject outcome = findObservable(requirement.observableDefinition(), visible);
+    List<FeasibilityCheck> checks = new ArrayList<>();
+    List<String> blockers = new ArrayList<>();
+    if (outcome == null) {
+      checks.add(
+          new FeasibilityCheck(
+              "primary-outcome-observable",
+              "FAIL",
+              null,
+              "Primary outcome is not a governed observable"));
+      blockers.add("MISSING_OUTCOME_OBSERVABLE:" + requirement.observableDefinition());
+    } else {
+      checks.add(
+          new FeasibilityCheck(
+              "primary-outcome-observable", "PASS", outcome.id(), "Primary outcome is governed"));
+    }
+    List<Map<String, Object>> variants = experimentVariants(requirement);
+    validateVariants(variants, checks, blockers);
+    checks.add(
+        new FeasibilityCheck(
+            "primary-outcome-event",
+            requirement.observableDefinition().isBlank() ? "FAIL" : "PASS",
+            outcome == null ? null : outcome.id(),
+            requirement.observableDefinition().isBlank()
+                ? "Primary outcome event must be declared"
+                : "Primary outcome event is declared"));
+    Map<String, Object> sampleInputs = sampleInputs(requirement);
+    List<String> missingInputs =
+        List.of("baselineConversionRate", "minimumDetectableEffect", "alpha", "power").stream()
+            .filter(key -> sampleInputs.get(key) == null)
+            .toList();
+    for (String input :
+        List.of("baselineConversionRate", "minimumDetectableEffect", "alpha", "power")) {
+      Number value = (Number) sampleInputs.get(input);
+      String status = value == null ? "UNKNOWN" : validSampleInput(input, value) ? "PASS" : "FAIL";
+      checks.add(
+          new FeasibilityCheck(
+              "sample-size-" + input,
+              status,
+              null,
+              value == null
+                  ? input + " is not available from governed material"
+                  : status.equals("PASS") ? input + " is governed" : input + " is invalid"));
+      if (status.equals("FAIL")) blockers.add("INVALID_SAMPLE_SIZE_INPUT:" + input);
+    }
+    boolean sampleInputsValid =
+        missingInputs.isEmpty()
+            && List.of("baselineConversionRate", "minimumDetectableEffect", "alpha", "power")
+                .stream()
+                .allMatch(input -> validSampleInput(input, (Number) sampleInputs.get(input)));
+    Integer computed = sampleInputsValid ? sampleSize(sampleInputs, variants.size()) : null;
+    boolean minimumExposureInvalid =
+        variants.stream()
+            .anyMatch(
+                variant ->
+                    variant.containsKey("minimumExposures")
+                        && !positiveInteger(variant.get("minimumExposures")));
+    boolean minimumExposureKnown =
+        variants.stream().allMatch(variant -> positiveInteger(variant.get("minimumExposures")))
+            || computed != null;
+    checks.add(
+        new FeasibilityCheck(
+            "minimum-exposures",
+            minimumExposureInvalid ? "FAIL" : minimumExposureKnown ? "PASS" : "UNKNOWN",
+            null,
+            minimumExposureInvalid
+                ? "Minimum exposures must be positive integers"
+                : minimumExposureKnown
+                    ? "Minimum exposures computed with a deterministic two-proportion calculation"
+                    : "Minimum exposures are UNKNOWN until all named sample-size inputs are governed"));
+    if (variants.stream().anyMatch(v -> !v.containsKey("minimumExposures"))) {
+      variants =
+          variants.stream()
+              .map(
+                  variant -> {
+                    Map<String, Object> copy = new LinkedHashMap<>(variant);
+                    copy.putIfAbsent("minimumExposures", computed);
+                    return copy;
+                  })
+              .toList();
+    }
+    Map<String, Object> design = new LinkedHashMap<>();
+    design.put("primaryOutcomeEvent", requirement.observableDefinition());
+    design.put("variants", variants);
+    design.put("measurementWindow", requirement.outcomeHorizon());
+    design.put(
+        "decisionRule",
+        "Ship only when the primary outcome meets the governed acceptance rule; otherwise iterate or stop.");
+    Map<String, Object> sampleSize = new LinkedHashMap<>(sampleInputs);
+    sampleSize.put("minimumExposuresPerVariant", computed);
+    design.put("sampleSize", sampleSize);
+    GenerationDraft draft =
+        new GenerationDraft(
+            "EXPERIMENT", design, blockers.isEmpty() ? "ACCEPTED" : "REJECTED", null, List.of());
+    boolean unknown = checks.stream().anyMatch(check -> check.status().equals("UNKNOWN"));
+    StageStatus status =
+        !blockers.isEmpty()
+            ? StageStatus.BLOCKED
+            : unknown ? StageStatus.AWAITING_APPROVAL : StageStatus.COMPLETED;
+    List<String> violated =
+        checks.stream()
+            .filter(check -> !check.status().equals("PASS"))
+            .map(check -> check.name() + ":" + check.reason())
+            .toList();
+    Instant finished = Instant.now();
+    repository.saveDrafts(attempt.id(), List.of(draft), violated);
+    if (status == StageStatus.AWAITING_APPROVAL) {
+      repository.awaitApproval(
+          attempt.id(), finished, elapsed(started, finished), blockers, checks, List.of());
+    } else {
+      repository.finish(
+          attempt.id(),
+          status,
+          finished,
+          elapsed(started, finished),
+          0,
+          blockers,
+          checks,
+          List.of());
+    }
+    repository.insertEvent(
+        base.id(),
+        attempt.stage(),
+        StageStatus.IN_PROGRESS,
+        status,
+        AGENT,
+        status == StageStatus.AWAITING_APPROVAL
+            ? "Unknown sample-size inputs require explicit human acceptance"
+            : blockers.isEmpty() ? "Experiment design completed" : "Experiment design blocked",
+        List.of());
+    return get(base.id());
+  }
+
+  private List<Map<String, Object>> experimentVariants(ModelRequirement requirement) {
+    Object configured = requirement.constraints().get("experimentVariants");
+    if (configured instanceof Collection<?> values && !values.isEmpty()) {
+      return values.stream()
+          .filter(Map.class::isInstance)
+          .map(value -> map((Map<?, ?>) value))
+          .toList();
+    }
+    return List.of(
+        Map.of("name", "control", "role", "CONTROL", "allocation", 50),
+        Map.of("name", "treatment", "role", "TREATMENT", "allocation", 50));
+  }
+
+  private void validateVariants(
+      List<Map<String, Object>> variants, List<FeasibilityCheck> checks, List<String> blockers) {
+    long controls =
+        variants.stream()
+            .filter(v -> "CONTROL".equalsIgnoreCase(String.valueOf(v.getOrDefault("role", ""))))
+            .count();
+    long treatments =
+        variants.stream()
+            .filter(v -> "TREATMENT".equalsIgnoreCase(String.valueOf(v.getOrDefault("role", ""))))
+            .count();
+    long allocation =
+        variants.stream()
+            .map(v -> number(v.get("allocation")))
+            .filter(java.util.Objects::nonNull)
+            .mapToLong(Number::longValue)
+            .sum();
+    boolean namesValid =
+        variants.stream()
+                .map(v -> String.valueOf(v.getOrDefault("name", "")).trim())
+                .noneMatch(String::isBlank)
+            && variants.stream()
+                    .map(v -> String.valueOf(v.getOrDefault("name", "")).trim().toLowerCase())
+                    .distinct()
+                    .count()
+                == variants.size()
+            && variants.stream()
+                .map(v -> String.valueOf(v.getOrDefault("name", "")))
+                .allMatch(name -> name.codePointCount(0, name.length()) <= 120);
+    boolean allocationsValid =
+        variants.stream().allMatch(v -> positiveInteger(v.get("allocation"))) && allocation == 100;
+    checks.add(
+        new FeasibilityCheck(
+            "variant-roles",
+            controls == 1 && treatments >= 1 ? "PASS" : "FAIL",
+            null,
+            controls == 1 && treatments >= 1
+                ? "Exactly one control and at least one treatment"
+                : "Experiment requires exactly one control and at least one treatment"));
+    checks.add(
+        new FeasibilityCheck(
+            "variant-names",
+            namesValid ? "PASS" : "FAIL",
+            null,
+            namesValid
+                ? "Variant names are unique, non-blank, and fit Aurora's varchar(120)"
+                : "Variant names must be unique, non-blank, and at most 120 characters"));
+    checks.add(
+        new FeasibilityCheck(
+            "variant-allocations",
+            allocationsValid ? "PASS" : "FAIL",
+            null,
+            allocationsValid
+                ? "Variant allocations are positive integers summing to 100"
+                : "Variant allocations must be positive integers summing to 100"));
+    checks.add(
+        new FeasibilityCheck(
+            "variant-minimum-exposures",
+            variants.stream()
+                    .allMatch(
+                        v ->
+                            !v.containsKey("minimumExposures")
+                                || positiveInteger(v.get("minimumExposures")))
+                ? "PASS"
+                : "FAIL",
+            null,
+            "Minimum exposures must be positive when declared"));
+    if (controls != 1 || treatments < 1) blockers.add("INVALID_VARIANT_ROLES");
+    if (!namesValid) blockers.add("INVALID_VARIANT_NAMES");
+    if (!allocationsValid) blockers.add("INVALID_VARIANT_ALLOCATIONS");
+    if (checks.get(checks.size() - 1).status().equals("FAIL")) {
+      blockers.add("INVALID_MINIMUM_EXPOSURES");
+    }
+  }
+
+  private Map<String, Object> sampleInputs(ModelRequirement requirement) {
+    Map<String, Object> result = new LinkedHashMap<>();
+    for (String key :
+        List.of("baselineConversionRate", "minimumDetectableEffect", "alpha", "power")) {
+      result.put(key, number(requirement.constraints().get(key)));
+    }
+    return result;
+  }
+
+  private Number number(Object value) {
+    if (value instanceof Number number) return number;
+    if (value == null) return null;
+    try {
+      return Double.parseDouble(String.valueOf(value));
+    } catch (NumberFormatException exception) {
+      return null;
+    }
+  }
+
+  private boolean positiveInteger(Object value) {
+    Number parsed = number(value);
+    return parsed != null
+        && Double.isFinite(parsed.doubleValue())
+        && parsed.doubleValue() > 0
+        && parsed.doubleValue() == Math.rint(parsed.doubleValue());
+  }
+
+  private boolean validSampleInput(String key, Number value) {
+    double parsed = value.doubleValue();
+    if (!Double.isFinite(parsed)) return false;
+    return switch (key) {
+      case "baselineConversionRate" -> parsed > 0 && parsed < 1;
+      case "minimumDetectableEffect" -> parsed > 0 && parsed < 1;
+      case "alpha", "power" -> parsed > 0 && parsed < 1;
+      default -> false;
+    };
+  }
+
+  private Integer sampleSize(Map<String, Object> inputs, int variants) {
+    double baseline = ((Number) inputs.get("baselineConversionRate")).doubleValue();
+    double effect = ((Number) inputs.get("minimumDetectableEffect")).doubleValue();
+    double alpha = ((Number) inputs.get("alpha")).doubleValue();
+    double power = ((Number) inputs.get("power")).doubleValue();
+    if (baseline <= 0
+        || baseline >= 1
+        || effect <= 0
+        || alpha <= 0
+        || alpha >= 1
+        || power <= 0
+        || power >= 1) return null;
+    double treatment = Math.min(0.999999, baseline + effect);
+    double pooled = (baseline + treatment) / 2;
+    double za = normalQuantile(1 - alpha / 2);
+    double zp = normalQuantile(power);
+    double value =
+        Math.pow(
+                za * Math.sqrt(2 * pooled * (1 - pooled))
+                    + zp * Math.sqrt(baseline * (1 - baseline) + treatment * (1 - treatment)),
+                2)
+            / Math.pow(treatment - baseline, 2);
+    return (int) Math.ceil(value);
+  }
+
+  private double normalQuantile(double probability) {
+    double[] coefficients = {
+      -39.6968302866538,
+      220.946098424521,
+      -275.928510446969,
+      138.357751867269,
+      -30.6647980661472,
+      2.50662827745924
+    };
+    double[] denominator = {
+      -54.4760987982241, 161.585836858041, -155.698979859887, 66.8013118877197, -13.2806815528857
+    };
+    double[] lower = {
+      -0.00778489400243029,
+      -0.322396458041136,
+      -2.40075827716184,
+      -2.54973253934373,
+      4.37466414146497,
+      2.93816398269878
+    };
+    double[] upper = {0.00778469570904146, 0.32246712907004, 2.445134137143, 3.75440866190742};
+    if (probability < 0.02425) {
+      double q = Math.sqrt(-2 * Math.log(probability));
+      return polynomial(lower, q) / (polynomial(upper, q) * q + 1);
+    }
+    if (probability > 1 - 0.02425) {
+      double q = Math.sqrt(-2 * Math.log(1 - probability));
+      return -polynomial(lower, q) / (polynomial(upper, q) * q + 1);
+    }
+    double q = probability - 0.5;
+    double r = q * q;
+    return polynomial(coefficients, r) * q / (polynomial(denominator, r) * r + 1);
+  }
+
+  private double polynomial(double[] coefficients, double value) {
+    double result = 0;
+    for (double coefficient : coefficients) result = result * value + coefficient;
+    return result;
+  }
+
+  private Initiative awaitHandoff(
+      InitiativeRepository.Base base, InitiativeRepository.Attempt attempt, Instant started) {
+    List<String> blockers = handoffBlockers(base);
+    Instant finished = Instant.now();
+    if (!blockers.isEmpty()) {
+      repository.finish(
+          attempt.id(),
+          StageStatus.BLOCKED,
+          finished,
+          elapsed(started, finished),
+          0,
+          blockers,
+          List.of(),
+          List.of());
+      repository.insertEvent(
+          base.id(),
+          attempt.stage(),
+          StageStatus.IN_PROGRESS,
+          StageStatus.BLOCKED,
+          AGENT,
+          "Handoff preconditions failed",
+          List.of());
+      return get(base.id());
+    }
+    HandoffPackage handoff = buildPackage(base);
+    UUID packageId = repository.savePackage(base.id(), handoff.hash(), handoff.content());
+    List<ArtifactReference> artifacts =
+        List.of(new ArtifactReference("HANDOFF_PACKAGE", packageId, false));
+    repository.awaitApproval(
+        attempt.id(), finished, elapsed(started, finished), List.of(), List.of(), artifacts);
+    repository.insertEvent(
+        base.id(),
+        attempt.stage(),
+        StageStatus.IN_PROGRESS,
+        StageStatus.AWAITING_APPROVAL,
+        AGENT,
+        "Awaiting human handoff approval",
+        artifacts);
+    return get(base.id());
+  }
+
+  private List<String> handoffBlockers(InitiativeRepository.Base base) {
+    List<String> blockers = new ArrayList<>();
+    InitiativeRepository.Attempt targeting = latest(base.id(), InitiativeStage.TARGETING_DESIGN);
+    InitiativeRepository.Attempt feature = latest(base.id(), InitiativeStage.FEATURE_DESIGN);
+    InitiativeRepository.Attempt experiment = latest(base.id(), InitiativeStage.EXPERIMENT_DESIGN);
+    InitiativeRepository.Attempt feasibility = latest(base.id(), InitiativeStage.DATA_FEASIBILITY);
+    if (targeting.status() != StageStatus.COMPLETED) blockers.add("TARGETING_DESIGN_NOT_COMPLETED");
+    if (feature.status() != StageStatus.COMPLETED) blockers.add("FEATURE_DESIGN_NOT_COMPLETED");
+    ModelRequirement requirement = discovery.getRequirement(base.requirementId());
+    List<KnowledgeObject> features = referencedFeatures(requirement, feature);
+    Set<KnowledgeObject> dataAssets = new java.util.LinkedHashSet<>();
+    for (KnowledgeObject object : features) {
+      if (!"APPROVED".equals(object.lifecycleStatus())) {
+        blockers.add("FEATURE_NOT_APPROVED:" + object.knowledgeKey());
+      }
+      if (hasOpenBlockingConflict(object, true)) {
+        blockers.add("OPEN_CONFLICT:" + object.knowledgeKey());
+      }
+      dataAssets.addAll(
+          resolveDataAssets(
+              object,
+              knowledge.search(null, null, null, null, null, null, true).stream()
+                  .collect(java.util.stream.Collectors.toMap(KnowledgeObject::id, value -> value)),
+              true));
+    }
+    if (experiment.status() != StageStatus.COMPLETED) {
+      blockers.add("EXPERIMENT_DESIGN_NOT_COMPLETED");
+    }
+    List<String> unknown =
+        feasibility.feasibilityChecks().stream()
+            .filter(check -> check.status().equals("UNKNOWN"))
+            .map(FeasibilityCheck::name)
+            .toList();
+    if (!unknown.isEmpty() && !acceptedUnknowns(base.id(), feasibility, unknown)) {
+      unknown.forEach(check -> blockers.add("DATA_FEASIBILITY_UNKNOWN_NOT_ACCEPTED:" + check));
+    }
+    KnowledgeObject outcome =
+        findObservable(
+            requirement.observableDefinition(),
+            knowledge.search(null, null, null, null, null, null, true));
+    if (outcome == null) {
+      blockers.add("MISSING_REQUIRED_OBSERVABLE:" + requirement.observableDefinition());
+    } else if (hasOpenBlockingConflict(outcome, true)) {
+      blockers.add("OPEN_CONFLICT:" + outcome.knowledgeKey());
+    } else {
+      dataAssets.addAll(
+          resolveDataAssets(
+              outcome,
+              knowledge.search(null, null, null, null, null, null, true).stream()
+                  .collect(java.util.stream.Collectors.toMap(KnowledgeObject::id, value -> value)),
+              true));
+    }
+    dataAssets.stream()
+        .filter(asset -> hasOpenBlockingConflict(asset, true))
+        .map(KnowledgeObject::knowledgeKey)
+        .map(key -> "OPEN_CONFLICT:" + key)
+        .forEach(blockers::add);
+    return blockers.stream().distinct().toList();
+  }
+
+  private boolean acceptedUnknowns(
+      UUID initiativeId, InitiativeRepository.Attempt attempt, List<String> unknown) {
+    return repository.decisions(initiativeId).stream()
+        .anyMatch(
+            row ->
+                row.stage() == attempt.stage()
+                    && row.stageAttemptId().equals(attempt.id())
+                    && row.decision().equals("APPROVE")
+                    && row.actor() != null
+                    && !row.actor().isBlank()
+                    && row.acceptedUnknownChecks().equals(unknown.stream().sorted().toList()));
+  }
+
+  private List<KnowledgeObject> referencedFeatures(
+      ModelRequirement requirement, InitiativeRepository.Attempt featureAttempt) {
+    List<KnowledgeObject> available =
+        knowledge.search("FEATURE", null, null, null, null, null, true);
+    Set<String> names = new java.util.LinkedHashSet<>();
+    Object required = requirement.constraints().get("requiredFeatures");
+    if (required instanceof Collection<?> values) {
+      values.forEach(value -> names.add(String.valueOf(value)));
+    }
+    featureAttempt.drafts().stream()
+        .filter(draft -> "ACCEPTED".equals(draft.outcome()) || "REUSE".equals(draft.outcome()))
+        .map(draft -> string(draft.payload(), "name"))
+        .filter(name -> !name.isBlank())
+        .forEach(names::add);
+    return available.stream()
+        .filter(object -> names.stream().anyMatch(name -> object.name().equalsIgnoreCase(name)))
+        .sorted(
+            Comparator.comparing(KnowledgeObject::knowledgeKey)
+                .thenComparingInt(KnowledgeObject::version)
+                .reversed())
+        .collect(
+            java.util.stream.Collectors.collectingAndThen(
+                java.util.stream.Collectors.toMap(
+                    KnowledgeObject::knowledgeKey,
+                    object -> object,
+                    (first, ignored) -> first,
+                    LinkedHashMap::new),
+                map -> List.copyOf(map.values())));
+  }
+
+  private HandoffPackage buildPackage(InitiativeRepository.Base base) {
+    ModelRequirement requirement = discovery.getRequirement(base.requirementId());
+    InitiativeRepository.Attempt targeting = latest(base.id(), InitiativeStage.TARGETING_DESIGN);
+    InitiativeRepository.Attempt feature = latest(base.id(), InitiativeStage.FEATURE_DESIGN);
+    InitiativeRepository.Attempt experiment = latest(base.id(), InitiativeStage.EXPERIMENT_DESIGN);
+    List<KnowledgeObject> features = referencedFeatures(requirement, feature);
+    List<Map<String, Object>> evidence = new ArrayList<>();
+    List<KnowledgeObject> referenced = new ArrayList<>(features);
+    KnowledgeObject outcome =
+        findObservable(
+            requirement.observableDefinition(),
+            knowledge.search(null, null, null, null, null, null, true));
+    if (outcome != null) referenced.add(outcome);
+    Set<KnowledgeObject> dataAssets = new java.util.LinkedHashSet<>();
+    Map<UUID, KnowledgeObject> visibleById =
+        knowledge.search(null, null, null, null, null, null, true).stream()
+            .collect(java.util.stream.Collectors.toMap(KnowledgeObject::id, value -> value));
+    for (KnowledgeObject object : referenced) {
+      dataAssets.addAll(resolveDataAssets(object, visibleById, true));
+    }
+    referenced.addAll(dataAssets);
+    for (KnowledgeObject object : referenced) {
+      KnowledgePackage pack = knowledge.get(object.id(), true);
+      for (KnowledgeEvidence item : pack.evidence()) {
+        evidence.add(
+            Map.of(
+                "knowledgeId", object.id().toString(),
+                "sourceFile", item.sourceUri(),
+                "commit", item.sourceVersion(),
+                "contentHash", evidenceHash(item)));
+      }
+    }
+    Map<String, Object> content = new LinkedHashMap<>();
+    content.put("requirementId", base.requirementId().toString());
+    content.put("declaredObservables", requirement.requiredObservables());
+    content.put(
+        "targeting",
+        Map.of(
+            "design",
+            acceptedPayload(targeting),
+            "validatorVerdicts",
+            targeting.drafts().stream()
+                .filter(
+                    draft -> "ACCEPTED".equals(draft.outcome()) || "REUSE".equals(draft.outcome()))
+                .flatMap(draft -> draft.validatorVerdicts().stream())
+                .toList()));
+    content.put(
+        "features",
+        features.stream()
+            .map(
+                object ->
+                    Map.of(
+                        "knowledgeId", object.id().toString(),
+                        "knowledgeKey", object.knowledgeKey(),
+                        "version", object.version()))
+            .toList());
+    content.put(
+        "dataAssets",
+        dataAssets.stream()
+            .map(
+                object ->
+                    Map.of(
+                        "knowledgeId", object.id().toString(),
+                        "knowledgeKey", object.knowledgeKey(),
+                        "version", object.version()))
+            .toList());
+    content.put(
+        "experimentDesign",
+        experiment.drafts().stream().findFirst().map(GenerationDraft::payload).orElse(Map.of()));
+    content.put(
+        "feasibility",
+        Map.of(
+            "checks",
+            latest(base.id(), InitiativeStage.DATA_FEASIBILITY).feasibilityChecks(),
+            "acceptedBy",
+            repository.decisions(base.id()).stream()
+                .filter(
+                    row ->
+                        row.stage() == InitiativeStage.DATA_FEASIBILITY
+                            && "APPROVE".equals(row.decision()))
+                .map(row -> row.actor())
+                .toList()));
+    content.put("evidence", evidence);
+    content.put("notIncluded", List.of("trained model", "weights", "evaluation", "expected lift"));
+    return HandoffPackage.create(mapper, content);
+  }
+
+  private String evidenceHash(KnowledgeEvidence evidence) {
+    try {
+      return java.util.HexFormat.of()
+          .formatHex(
+              java.security.MessageDigest.getInstance("SHA-256")
+                  .digest(evidence.excerpt().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    } catch (java.security.NoSuchAlgorithmException exception) {
+      throw new IllegalStateException("Unable to hash evidence", exception);
+    }
+  }
+
+  private Map<String, Object> acceptedPayload(InitiativeRepository.Attempt attempt) {
+    return attempt.drafts().stream()
+        .filter(draft -> "ACCEPTED".equals(draft.outcome()) || "REUSE".equals(draft.outcome()))
+        .findFirst()
+        .map(GenerationDraft::payload)
+        .orElse(Map.of());
+  }
+
+  private Initiative completeHandoff(
+      UUID initiativeId,
+      InitiativeRepository.Base base,
+      InitiativeRepository.Attempt attempt,
+      GateDecisionRequest request,
+      Instant started,
+      long wait) {
+    HandoffPackage handoff = buildPackage(base);
+    UUID packageId = repository.savePackage(base.id(), handoff.hash(), handoff.content());
+    String name = base.id().toString();
+    Map<String, Object> payload = new LinkedHashMap<>(handoff.content());
+    payload.put("studioInitiativeId", base.id().toString());
+    payload.put("packageHash", handoff.hash());
+    Instant outboundStarted = Instant.now();
+    AuroraCandidateClient.Registration registration;
+    try {
+      registration =
+          aurora == null
+              ? new AuroraCandidateClient.Registration(
+                  false, null, null, null, "AURORA_UNREACHABLE")
+              : aurora.register(name, payload, handoff.hash());
+    } catch (RuntimeException exception) {
+      registration =
+          new AuroraCandidateClient.Registration(false, null, null, null, "AURORA_UNREACHABLE");
+    }
+    Instant outboundFinished = Instant.now();
+    String outcome = registration.successful() ? "REGISTERED" : "PROVIDER_FAILED";
+    repository.saveHandoffAttempt(
+        base.id(),
+        attempt.id(),
+        handoff.hash(),
+        aurora == null ? "/api/models/" + name + "/candidates" : aurora.endpoint(name),
+        Map.of("packageHash", handoff.hash(), "fieldNames", payload.keySet()),
+        registration.responseStatus(),
+        registration.candidateId(),
+        registration.candidateStatus(),
+        outcome,
+        registration.failureCode(),
+        registration.successful() ? null : "Aurora candidate registration failed",
+        outboundStarted,
+        outboundFinished);
+    List<ArtifactReference> artifacts =
+        List.of(new ArtifactReference("HANDOFF_PACKAGE", packageId, false));
+    StageStatus status =
+        registration.successful() ? StageStatus.COMPLETED : StageStatus.PROVIDER_FAILED;
+    repository.finish(
+        attempt.id(),
+        status,
+        outboundFinished,
+        attempt.machineDurationMillis() + elapsed(started, outboundFinished),
+        wait,
+        List.of(),
+        List.of(),
+        artifacts);
+    repository.insertEvent(
+        initiativeId,
+        InitiativeStage.HANDOFF,
+        StageStatus.AWAITING_APPROVAL,
+        status,
+        request.actor(),
+        registration.successful()
+            ? "Design package registered; Aurora awaits client-trained weights"
+            : "Aurora candidate registration failed",
+        artifacts);
+    return get(initiativeId);
   }
 
   private Initiative finishTargeting(
@@ -1078,17 +1752,22 @@ public class InitiativeService {
   }
 
   private boolean hasOpenBlockingConflict(KnowledgeObject object, boolean includeCandidates) {
-    KnowledgePackage packageData = knowledge.get(object.id(), includeCandidates);
+    return hasOpenBlockingConflict(object.id(), includeCandidates, new java.util.HashSet<>());
+  }
+
+  private boolean hasOpenBlockingConflict(
+      UUID objectId, boolean includeCandidates, Set<UUID> visited) {
+    if (!visited.add(objectId)) return false;
+    KnowledgePackage packageData = knowledge.get(objectId, includeCandidates);
     if (hasOpenBlockingConflict(packageData.conflicts())) return true;
     return packageData.relationships().stream()
         .filter(relationship -> relationship.relationshipType() == RelationshipType.GOVERNED_BY)
         .map(
             relationship ->
-                relationship.fromObjectId().equals(object.id())
+                relationship.fromObjectId().equals(objectId)
                     ? relationship.toObjectId()
                     : relationship.fromObjectId())
-        .map(id -> knowledge.get(id, includeCandidates))
-        .anyMatch(related -> hasOpenBlockingConflict(related.conflicts()));
+        .anyMatch(id -> hasOpenBlockingConflict(id, includeCandidates, visited));
   }
 
   private boolean hasOpenBlockingConflict(List<KnowledgeConflict> conflicts) {
@@ -1352,15 +2031,19 @@ public class InitiativeService {
         attempt.drafts(),
         attempt.draftsGenerated(),
         attempt.draftsRejected(),
-        attempt.violatedChecks());
+        attempt.violatedChecks(),
+        attempt.handoffAttempts());
   }
 
   private String stageNote(InitiativeStage stage) {
     if (stage == InitiativeStage.CANDIDATE_BUILD) {
       return "Training occurs in the client environment";
     }
-    if (stage == InitiativeStage.EXPERIMENT_DESIGN || stage == InitiativeStage.HANDOFF) {
-      return "NOT_IMPLEMENTED";
+    if (stage == InitiativeStage.EXPERIMENT_DESIGN) {
+      return "Deterministic design; training, weights, and evaluation remain client-owned";
+    }
+    if (stage == InitiativeStage.HANDOFF) {
+      return "Human-approved design package; Aurora awaits client-trained weights";
     }
     return null;
   }

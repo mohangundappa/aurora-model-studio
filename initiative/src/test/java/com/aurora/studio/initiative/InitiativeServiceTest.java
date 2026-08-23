@@ -148,7 +148,7 @@ class InitiativeServiceTest {
             stage ->
                 stage.stage() == InitiativeStage.EXPERIMENT_DESIGN
                     || stage.stage() == InitiativeStage.HANDOFF)
-        .allSatisfy(stage -> assertThat(stage.status()).isEqualTo(StageStatus.NOT_IMPLEMENTED));
+        .allSatisfy(stage -> assertThat(stage.status()).isEqualTo(StageStatus.PENDING));
     assertThat(
             result.stages().stream()
                 .filter(stage -> stage.stage() == InitiativeStage.CANDIDATE_BUILD)
@@ -1115,6 +1115,188 @@ class InitiativeServiceTest {
   }
 
   @Test
+  void experimentDesignNamesUnknownSampleInputsAndAwaitsApproval() {
+    KnowledgeObject outcome = observable(UUID.randomUUID(), "BOOKING_COMPLETED");
+    ModelRequirement requirement =
+        new ModelRequirement(
+            "domain",
+            "use-case",
+            "BOOKING_COMPLETED",
+            "BOOKING_COMPLETED",
+            "sessions",
+            "30d",
+            "batch",
+            "action",
+            Map.of(),
+            Map.of(),
+            Map.of(),
+            List.of("BOOKING_COMPLETED"),
+            false);
+    InitiativeRepository.Attempt experiment =
+        attempt(attemptId, InitiativeStage.EXPERIMENT_DESIGN, StageStatus.PENDING, 1);
+    InitiativeRepository.Attempt feature =
+        attempt(UUID.randomUUID(), InitiativeStage.FEATURE_DESIGN, StageStatus.COMPLETED, 1);
+    when(repository.find(initiativeId)).thenReturn(Optional.of(base()));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.EXPERIMENT_DESIGN))
+        .thenReturn(Optional.of(experiment));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.FEATURE_DESIGN))
+        .thenReturn(Optional.of(feature));
+    when(discovery.getRequirement(any())).thenReturn(requirement);
+    when(knowledge.search(null, null, null, null, null, null, true)).thenReturn(List.of(outcome));
+    when(repository.attempts(initiativeId)).thenReturn(allAttempts(experiment, feature));
+    when(repository.decisions(initiativeId)).thenReturn(List.of());
+    when(repository.events(initiativeId)).thenReturn(List.of());
+
+    service.runStage(initiativeId, InitiativeStage.EXPERIMENT_DESIGN);
+
+    ArgumentCaptor<List<FeasibilityCheck>> checks = ArgumentCaptor.forClass(List.class);
+    verify(repository)
+        .awaitApproval(
+            eq(attemptId), any(), anyLong(), eq(List.of()), checks.capture(), eq(List.of()));
+    assertThat(checks.getValue())
+        .filteredOn(check -> check.status().equals("UNKNOWN"))
+        .extracting(FeasibilityCheck::name)
+        .containsExactly(
+            "sample-size-baselineConversionRate",
+            "sample-size-minimumDetectableEffect",
+            "sample-size-alpha",
+            "sample-size-power",
+            "minimum-exposures");
+  }
+
+  @Test
+  void invalidExperimentVariantsBlockBeforeHandoff() {
+    KnowledgeObject outcome = observable(UUID.randomUUID(), "BOOKING_COMPLETED");
+    Map<String, Object> invalidTreatment =
+        Map.of(
+            "name", "x".repeat(121), "role", "TREATMENT", "allocation", 50, "minimumExposures", 0);
+    ModelRequirement requirement =
+        new ModelRequirement(
+            "domain",
+            "use-case",
+            "BOOKING_COMPLETED",
+            "BOOKING_COMPLETED",
+            "sessions",
+            "30d",
+            "batch",
+            "action",
+            Map.of(
+                "experimentVariants",
+                List.of(Map.of("name", "", "role", "CONTROL", "allocation", 50), invalidTreatment)),
+            Map.of(),
+            Map.of(),
+            List.of("BOOKING_COMPLETED"),
+            false);
+    InitiativeRepository.Attempt experiment =
+        attempt(attemptId, InitiativeStage.EXPERIMENT_DESIGN, StageStatus.PENDING, 1);
+    InitiativeRepository.Attempt feature =
+        attempt(UUID.randomUUID(), InitiativeStage.FEATURE_DESIGN, StageStatus.COMPLETED, 1);
+    when(repository.find(initiativeId)).thenReturn(Optional.of(base()));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.EXPERIMENT_DESIGN))
+        .thenReturn(Optional.of(experiment));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.FEATURE_DESIGN))
+        .thenReturn(Optional.of(feature));
+    when(discovery.getRequirement(any())).thenReturn(requirement);
+    when(knowledge.search(null, null, null, null, null, null, true)).thenReturn(List.of(outcome));
+    when(repository.attempts(initiativeId)).thenReturn(allAttempts(experiment, feature));
+    when(repository.decisions(initiativeId)).thenReturn(List.of());
+    when(repository.events(initiativeId)).thenReturn(List.of());
+
+    service.runStage(initiativeId, InitiativeStage.EXPERIMENT_DESIGN);
+
+    verify(repository)
+        .finish(
+            eq(attemptId),
+            eq(StageStatus.BLOCKED),
+            any(),
+            anyLong(),
+            eq(0L),
+            org.mockito.ArgumentMatchers.argThat(
+                blockers ->
+                    blockers.contains("INVALID_VARIANT_NAMES")
+                        && blockers.contains("INVALID_MINIMUM_EXPOSURES")),
+            any(),
+            eq(List.of()));
+  }
+
+  @Test
+  void extractedGeneratedFeatureBlocksHandoffWithoutOutboundAttempt() {
+    KnowledgeObject outcome = observable(UUID.randomUUID(), "BOOKING_COMPLETED");
+    KnowledgeObject candidate = feature(UUID.randomUUID(), "generated-feature");
+    candidate = withLifecycle(candidate, "EXTRACTED");
+    ModelRequirement requirement =
+        requirement(
+            List.of("BOOKING_COMPLETED"),
+            Map.of("requiredFeatures", List.of("generated-feature")),
+            "30d",
+            "batch",
+            "sessions");
+    InitiativeRepository.Attempt handoff =
+        attempt(attemptId, InitiativeStage.HANDOFF, StageStatus.PENDING, 1);
+    InitiativeRepository.Attempt experiment =
+        attempt(UUID.randomUUID(), InitiativeStage.EXPERIMENT_DESIGN, StageStatus.COMPLETED, 1);
+    InitiativeRepository.Attempt targeting =
+        attempt(UUID.randomUUID(), InitiativeStage.TARGETING_DESIGN, StageStatus.COMPLETED, 1);
+    InitiativeRepository.Attempt featureAttempt =
+        new InitiativeRepository.Attempt(
+            UUID.randomUUID(),
+            InitiativeStage.FEATURE_DESIGN,
+            1,
+            StageStatus.COMPLETED,
+            null,
+            null,
+            0,
+            0,
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(
+                new GenerationDraft(
+                    "FEATURE", Map.of("name", "generated-feature"), "ACCEPTED", null, List.of())),
+            1,
+            0,
+            List.of());
+    InitiativeRepository.Attempt feasibility =
+        attempt(UUID.randomUUID(), InitiativeStage.DATA_FEASIBILITY, StageStatus.COMPLETED, 1);
+    when(repository.find(initiativeId)).thenReturn(Optional.of(base()));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.HANDOFF))
+        .thenReturn(Optional.of(handoff));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.EXPERIMENT_DESIGN))
+        .thenReturn(Optional.of(experiment));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.TARGETING_DESIGN))
+        .thenReturn(Optional.of(targeting));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.FEATURE_DESIGN))
+        .thenReturn(Optional.of(featureAttempt));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.DATA_FEASIBILITY))
+        .thenReturn(Optional.of(feasibility));
+    when(discovery.getRequirement(any())).thenReturn(requirement);
+    when(knowledge.search("FEATURE", null, null, null, null, null, true))
+        .thenReturn(List.of(candidate));
+    when(knowledge.search(null, null, null, null, null, null, true))
+        .thenReturn(List.of(outcome, candidate));
+    when(knowledge.get(candidate.id(), true)).thenReturn(packageFor(candidate));
+    when(knowledge.get(outcome.id(), true)).thenReturn(packageFor(outcome));
+    when(repository.attempts(initiativeId))
+        .thenReturn(allAttempts(handoff, experiment), allAttempts(handoff, experiment));
+    when(repository.decisions(initiativeId)).thenReturn(List.of());
+    when(repository.events(initiativeId)).thenReturn(List.of());
+
+    service.runStage(initiativeId, InitiativeStage.HANDOFF);
+
+    verify(repository)
+        .finish(
+            eq(attemptId),
+            eq(StageStatus.BLOCKED),
+            any(),
+            anyLong(),
+            eq(0L),
+            org.mockito.ArgumentMatchers.argThat(
+                blockers -> blockers.contains("FEATURE_NOT_APPROVED:feature:generated-feature")),
+            eq(List.of()),
+            eq(List.of()));
+  }
+
+  @Test
   void blockedTargetingPreventsFeatureDesign() {
     InitiativeRepository.Attempt targeting =
         attempt(attemptId, InitiativeStage.TARGETING_DESIGN, StageStatus.BLOCKED, 1);
@@ -1239,6 +1421,35 @@ class InitiativeServiceTest {
 
   private KnowledgeObject feature(UUID id, String name) {
     return knowledgeObject(id, KnowledgeType.FEATURE, "feature:" + name, name);
+  }
+
+  private KnowledgeObject withLifecycle(KnowledgeObject object, String lifecycle) {
+    return new KnowledgeObject(
+        object.id(),
+        object.clientId(),
+        object.knowledgeKey(),
+        object.version(),
+        object.knowledgeType(),
+        object.name(),
+        object.businessDomain(),
+        object.businessUseCase(),
+        object.businessDescription(),
+        object.canonicalTaxonomy(),
+        object.clientTaxonomy(),
+        object.tags(),
+        lifecycle,
+        object.effectiveFrom(),
+        object.effectiveTo(),
+        object.confidence(),
+        object.confidenceBreakdown(),
+        object.qualityAssessment(),
+        object.llmInvocationId(),
+        object.extractedBy(),
+        object.reviewedBy(),
+        object.approvedBy(),
+        object.approvalComments(),
+        object.attributes(),
+        object.synthetic());
   }
 
   private KnowledgeObject knowledgeObject(UUID id, KnowledgeType type, String key, String name) {
@@ -1412,7 +1623,7 @@ class InitiativeServiceTest {
   private StageStatus defaultStatus(InitiativeStage stage) {
     if (stage == InitiativeStage.REQUIREMENT_INTAKE) return StageStatus.COMPLETED;
     if (stage == InitiativeStage.EXPERIMENT_DESIGN || stage == InitiativeStage.HANDOFF) {
-      return StageStatus.NOT_IMPLEMENTED;
+      return StageStatus.PENDING;
     }
     if (stage == InitiativeStage.CANDIDATE_BUILD) return StageStatus.OUT_OF_SCOPE;
     return StageStatus.PENDING;
