@@ -102,11 +102,12 @@ public class ExtractionService {
     Map<String, Integer> counts = new LinkedHashMap<>();
     List<UUID> candidates = new ArrayList<>();
     java.util.Set<String> seenKeys = new java.util.HashSet<>();
+    int unchangedArtifacts = 0;
     for (Artifact artifact : artifacts) {
       String sourceVersion = revision + ":" + artifact.structuralFact().sourceHash();
       if (!seenKeys.add(artifact.knowledgeKey())
           || repository.hasEvidence(artifact.knowledgeKey(), sourceVersion)) {
-        skippedArtifacts++;
+        unchangedArtifacts++;
         continue;
       }
       ExtractionCandidate candidate = interpret(artifact, synthetic);
@@ -124,7 +125,7 @@ public class ExtractionService {
       candidates.add(object.id());
       counts.merge(object.knowledgeType().name(), 1, Integer::sum);
     }
-    return new ExtractionRun(counts, candidates, synthetic, skippedArtifacts);
+    return new ExtractionRun(counts, candidates, synthetic, skippedArtifacts, unchangedArtifacts);
   }
 
   public ExtractionRun extractSyntheticEstate() {
@@ -330,5 +331,14 @@ public class ExtractionService {
       Map<String, Integer> counts,
       List<UUID> candidateIds,
       boolean synthetic,
-      int skippedArtifacts) {}
+      int skippedArtifacts,
+      int unchangedArtifacts) {
+    public ExtractionRun(
+        Map<String, Integer> counts,
+        List<UUID> candidateIds,
+        boolean synthetic,
+        int skippedArtifacts) {
+      this(counts, candidateIds, synthetic, skippedArtifacts, 0);
+    }
+  }
 }

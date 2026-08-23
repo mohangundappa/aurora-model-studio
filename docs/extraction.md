@@ -11,7 +11,10 @@ Extraction has two ordered passes.
    supported shape; extension alone never creates knowledge. Skips are counted
    in the extraction run summary. The pass records identifiers, inputs,
    windows, types, referenced tables/columns, file paths, commit/content hashes,
-   and bounded evidence excerpts without using a model.
+   and bounded evidence excerpts without using a model. The run summary
+   reports `skipped` for files that fail selection, exclusion, or shape
+   recognition, separately from `unchanged` artifacts that are already
+   represented by the same source version.
 2. The interpretation pass receives those facts and excerpts in a constrained
    data envelope. It may propose descriptions, domains, use cases, taxonomy,
    recommended attributes, and relationship hypotheses. Every retained

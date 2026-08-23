@@ -121,6 +121,7 @@ class AuroraBackfillImporterIntegrationTest {
       ExtractionService.ExtractionRun second = extraction.extract(fixture, false);
       assertThat(second.counts()).isEmpty();
       assertThat(second.candidateIds()).isEmpty();
+      assertThat(second.unchangedArtifacts()).isGreaterThan(0);
 
       Path changed =
           fixture.resolve(

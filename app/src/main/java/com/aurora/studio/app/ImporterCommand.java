@@ -46,6 +46,8 @@ public class ImporterCommand implements CommandLineRunner {
                   + result.candidateIds().size()
                   + " skipped="
                   + result.skippedArtifacts()
+                  + " unchanged="
+                  + result.unchangedArtifacts()
                   + " counts="
                   + result.counts());
         }
@@ -56,6 +58,8 @@ public class ImporterCommand implements CommandLineRunner {
                   + result.candidateIds().size()
                   + " skipped="
                   + result.skippedArtifacts()
+                  + " unchanged="
+                  + result.unchangedArtifacts()
                   + " counts="
                   + result.counts());
         }
