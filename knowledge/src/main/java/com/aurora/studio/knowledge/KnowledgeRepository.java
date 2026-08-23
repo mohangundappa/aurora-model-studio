@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -85,6 +86,15 @@ public class KnowledgeRepository {
         .findFirst();
   }
 
+  public boolean hasEvidence(String key, String sourceVersion) {
+    return jdbc.queryForObject(
+        "select exists(select 1 from knowledge_evidence e join knowledge_objects o on o.client_id=e.client_id and o.id=e.knowledge_object_id where e.client_id=? and o.knowledge_key=? and e.source_version=?)",
+        Boolean.class,
+        ClientContext.require(),
+        key,
+        sourceVersion);
+  }
+
   public Optional<KnowledgeObject> findApproved(String key) {
     return jdbc
         .query(
@@ -107,22 +117,35 @@ public class KnowledgeRepository {
 
   public List<KnowledgeObject> search(
       String type, String domain, String useCase, String status, String tag, String text) {
-    return jdbc.query(
-        "select * from knowledge_objects where client_id=? and (? is null or knowledge_type=?) and (? is null or business_domain=?) and (? is null or business_use_case=?) and (? is null or lifecycle_status=?) and (? is null or ?=any(tags)) and (? is null or lower(name||' '||business_description) like lower('%'||?||'%')) order by knowledge_key,version desc",
-        this::map,
-        ClientContext.require(),
-        type,
-        type,
-        domain,
-        domain,
-        useCase,
-        useCase,
-        status,
-        status,
-        tag,
-        tag,
-        text,
-        text);
+    StringBuilder sql = new StringBuilder("select * from knowledge_objects where client_id=?");
+    List<Object> parameters = new ArrayList<>();
+    parameters.add(ClientContext.require());
+    if (type != null) {
+      sql.append(" and knowledge_type=?");
+      parameters.add(type);
+    }
+    if (domain != null) {
+      sql.append(" and business_domain=?");
+      parameters.add(domain);
+    }
+    if (useCase != null) {
+      sql.append(" and business_use_case=?");
+      parameters.add(useCase);
+    }
+    if (status != null) {
+      sql.append(" and lifecycle_status=?");
+      parameters.add(status);
+    }
+    if (tag != null) {
+      sql.append(" and ?=any(tags)");
+      parameters.add(tag);
+    }
+    if (text != null) {
+      sql.append(" and lower(name||' '||business_description) like lower(?)");
+      parameters.add("%" + text + "%");
+    }
+    sql.append(" order by knowledge_key,version desc");
+    return jdbc.query(sql.toString(), this::map, parameters.toArray());
   }
 
   public List<KnowledgeObject> searchGovernanceRules(String enforcementPoint) {
