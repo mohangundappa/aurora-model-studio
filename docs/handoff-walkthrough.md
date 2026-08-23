@@ -254,7 +254,7 @@ Observed output:
       {
         "packageHash": "e6a9bf2d7645cd6974c1bd6af24b707e674ff04e94e87fea09ae6716f9b5ac2b",
         "responseStatus": 201,
-        "candidateId": "01f99136-f18d-4f44-9416-fbd9b61f1a93",
+        "candidateId": "06b4605f-951f-4e82-a580-7d36ba657bae",
         "candidateStatus": "AWAITING_WEIGHTS",
         "outcome": "REGISTERED",
         "failureCode": null,
@@ -295,7 +295,7 @@ Observed output:
   {
     "packageHash": "e6a9bf2d7645cd6974c1bd6af24b707e674ff04e94e87fea09ae6716f9b5ac2b",
     "responseStatus": 201,
-    "candidateId": "01f99136-f18d-4f44-9416-fbd9b61f1a93",
+    "candidateId": "06b4605f-951f-4e82-a580-7d36ba657bae",
     "candidateStatus": "AWAITING_WEIGHTS",
     "outcome": "REGISTERED",
     "failureCode": null
@@ -303,7 +303,7 @@ Observed output:
   {
     "packageHash": "e6a9bf2d7645cd6974c1bd6af24b707e674ff04e94e87fea09ae6716f9b5ac2b",
     "responseStatus": 201,
-    "candidateId": "01f99136-f18d-4f44-9416-fbd9b61f1a93",
+    "candidateId": "06b4605f-951f-4e82-a580-7d36ba657bae",
     "candidateStatus": "AWAITING_WEIGHTS",
     "outcome": "REGISTERED",
     "failureCode": null
@@ -335,7 +335,7 @@ Observed output:
 ```json
 [
   {
-    "candidateId": "01f99136-f18d-4f44-9416-fbd9b61f1a93",
+    "candidateId": "06b4605f-951f-4e82-a580-7d36ba657bae",
     "modelName": "booking-intent",
     "packageHash": "e6a9bf2d7645cd6974c1bd6af24b707e674ff04e94e87fea09ae6716f9b5ac2b",
     "studioInitiativeId": "9f02763e-6079-408e-9b4b-5bcb17f66b60",
