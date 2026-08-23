@@ -2,6 +2,10 @@ package com.aurora.studio.app;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.aurora.studio.common.ClientContext;
 import com.aurora.studio.extraction.ExtractionService;
@@ -14,17 +18,20 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @SpringBootTest
+@AutoConfigureMockMvc
 @Testcontainers(disabledWithoutDocker = true)
 @EnabledIf("dockerSocketIsAvailable")
 class KnowledgePostgresIntegrationTest {
@@ -40,6 +47,7 @@ class KnowledgePostgresIntegrationTest {
 
   @Autowired JdbcTemplate jdbc;
   @Autowired ExtractionService extraction;
+  @Autowired MockMvc mockMvc;
 
   @DynamicPropertySource
   static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -246,6 +254,98 @@ class KnowledgePostgresIntegrationTest {
                 Integer.class,
                 CLIENT))
         .isEqualTo(3);
+  }
+
+  @Test
+  void candidateRoutesRequireExplicitOptInAndSearchDefaultsToApproved() throws Exception {
+    UUID id = insert("candidate-route", CLIENT, "EXTRACTED");
+    jdbc.update(
+        "insert into knowledge_evidence(client_id,knowledge_object_id,source_system,source_type,source_uri,source_version,excerpt,extraction_certainty) values(?,?,?,?,?,?,?,?)",
+        CLIENT,
+        id,
+        "test",
+        "source-file",
+        "candidate-route.yaml",
+        "v1",
+        "candidate-route evidence",
+        1.0);
+
+    mockMvc
+        .perform(get("/api/knowledge/{id}", id).header("X-Aurora-Client", CLIENT.toString()))
+        .andExpect(status().isNotFound());
+    mockMvc
+        .perform(
+            get("/api/knowledge/{id}/evidence", id).header("X-Aurora-Client", CLIENT.toString()))
+        .andExpect(status().isNotFound());
+    mockMvc
+        .perform(get("/api/knowledge/{id}/impact", id).header("X-Aurora-Client", CLIENT.toString()))
+        .andExpect(status().isNotFound());
+    mockMvc
+        .perform(get("/api/knowledge").header("X-Aurora-Client", CLIENT.toString()))
+        .andExpect(status().isOk())
+        .andExpect(content().json("[]"));
+    mockMvc
+        .perform(
+            get("/api/knowledge/{id}", id)
+                .param("includeCandidates", "true")
+                .header("X-Aurora-Client", CLIENT.toString()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.trusted").value(false));
+    mockMvc
+        .perform(
+            get("/api/knowledge/{id}/evidence", id)
+                .param("includeCandidates", "true")
+                .header("X-Aurora-Client", CLIENT.toString()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].excerpt").value("candidate-route evidence"));
+    mockMvc
+        .perform(
+            get("/api/knowledge/{id}/impact", id)
+                .param("includeCandidates", "true")
+                .header("X-Aurora-Client", CLIENT.toString()))
+        .andExpect(status().isOk());
+  }
+
+  @Test
+  void governanceRulesWithoutFilterReturnApprovedRules() throws Exception {
+    jdbc.update(
+        "insert into knowledge_objects(client_id,knowledge_key,version,knowledge_type,name,business_domain,business_use_case,business_description,lifecycle_status,confidence,confidence_breakdown,attributes,extracted_by,synthetic) values(?,?,?,?,?,?,?,?,?,?,'{}',?::jsonb,'test',false)",
+        CLIENT,
+        "standard:governance-route",
+        1,
+        "STANDARD",
+        "governance-route",
+        "governance",
+        "testing",
+        "governance route test",
+        "APPROVED",
+        0.5,
+        "{\"rule\":\"test\",\"enforcementPoint\":\"testing\"}");
+    mockMvc
+        .perform(
+            get("/api/knowledge/governance-rules").header("X-Aurora-Client", CLIENT.toString()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].name").value("governance-route"));
+  }
+
+  @Test
+  void clientFilterRejectsNonCanonicalIdsWithJsonMessages() throws Exception {
+    mockMvc
+        .perform(get("/actuator/health").header("X-Aurora-Client", "0-0-0-0-1"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error").value("X-Aurora-Client must be a UUID"));
+    mockMvc
+        .perform(
+            get("/actuator/health")
+                .header("X-Aurora-Client", "00000000-0000-0000-0000-000000000001 "))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error").value("X-Aurora-Client must be a UUID"));
+    mockMvc
+        .perform(
+            get("/actuator/health")
+                .header("X-Aurora-Client", "00000000-0000-0000-0000-000000000099"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error").value("Unknown Aurora client"));
   }
 
   private UUID insert(String key, UUID client, String status) {

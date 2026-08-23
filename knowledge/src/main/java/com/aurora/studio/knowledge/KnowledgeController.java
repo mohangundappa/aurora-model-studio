@@ -72,8 +72,9 @@ public class KnowledgeController {
   }
 
   @GetMapping("/{id}/evidence")
-  public List<KnowledgeEvidence> evidence(@PathVariable UUID id) {
-    return service.getSourceEvidence(id);
+  public List<KnowledgeEvidence> evidence(
+      @PathVariable UUID id, @RequestParam(defaultValue = "false") boolean includeCandidates) {
+    return service.getSourceEvidence(id, includeCandidates);
   }
 
   @GetMapping("/governance-rules")
@@ -84,8 +85,10 @@ public class KnowledgeController {
 
   @GetMapping("/{id}/impact")
   public KnowledgeService.Impact impact(
-      @PathVariable UUID id, @RequestParam(defaultValue = "2") int depth) {
-    return service.analyzeImpact(id, depth);
+      @PathVariable UUID id,
+      @RequestParam(defaultValue = "2") int depth,
+      @RequestParam(defaultValue = "false") boolean includeCandidates) {
+    return service.analyzeImpact(id, depth, includeCandidates);
   }
 
   @ExceptionHandler(KnowledgeNotFoundException.class)

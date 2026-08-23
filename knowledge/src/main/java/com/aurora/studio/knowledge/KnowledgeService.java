@@ -180,10 +180,7 @@ public class KnowledgeService {
   }
 
   public KnowledgePackage get(UUID id, boolean includeCandidates) {
-    KnowledgeObject object = require(id);
-    if (!includeCandidates && !object.lifecycleStatus().equals("APPROVED")) {
-      throw new KnowledgeNotFoundException(id);
-    }
+    KnowledgeObject object = requireVisible(id, includeCandidates);
     List<KnowledgeEvidence> evidence = repository.evidence(id);
     List<KnowledgeRelationship> relationships = repository.relationships(id);
     List<KnowledgeObject> implementations =
@@ -228,9 +225,13 @@ public class KnowledgeService {
         null);
   }
 
-  public List<KnowledgeEvidence> getSourceEvidence(UUID id) {
-    require(id);
+  public List<KnowledgeEvidence> getSourceEvidence(UUID id, boolean includeCandidates) {
+    requireVisible(id, includeCandidates);
     return repository.evidence(id);
+  }
+
+  public List<KnowledgeEvidence> getSourceEvidence(UUID id) {
+    return getSourceEvidence(id, true);
   }
 
   @Transactional
@@ -275,8 +276,8 @@ public class KnowledgeService {
         .toList();
   }
 
-  public Impact analyzeImpact(UUID id, int depth) {
-    require(id);
+  public Impact analyzeImpact(UUID id, int depth, boolean includeCandidates) {
+    requireVisible(id, includeCandidates);
     int boundedDepth = Math.max(0, Math.min(depth, 5));
     List<ImpactPath> dependsOn = new ArrayList<>();
     List<ImpactPath> dependents = new ArrayList<>();
@@ -303,6 +304,10 @@ public class KnowledgeService {
       }
     }
     return new Impact(id, boundedDepth, dependsOn, dependents);
+  }
+
+  public Impact analyzeImpact(UUID id, int depth) {
+    return analyzeImpact(id, depth, true);
   }
 
   private void validate(Draft draft) {
@@ -460,6 +465,14 @@ public class KnowledgeService {
 
   private KnowledgeObject require(UUID id) {
     return repository.findById(id).orElseThrow(() -> new KnowledgeNotFoundException(id));
+  }
+
+  private KnowledgeObject requireVisible(UUID id, boolean includeCandidates) {
+    KnowledgeObject object = require(id);
+    if (!includeCandidates && !object.lifecycleStatus().equals("APPROVED")) {
+      throw new KnowledgeNotFoundException(id);
+    }
+    return object;
   }
 
   private void transition(KnowledgeObject object, String from, String to) {
