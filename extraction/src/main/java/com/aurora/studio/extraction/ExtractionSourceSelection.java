@@ -7,7 +7,7 @@ public record ExtractionSourceSelection(List<SourceSpec> sources) {
     return new ExtractionSourceSelection(
         List.of(
             new SourceSpec("signals/src/main/resources/signals", List.of("*.yaml", "*.yml")),
-            new SourceSpec("signals/src/main/java/com/aurora/signals", List.of("*Calculator.java")),
+            new SourceSpec("signals/src/main/java/com/aurora/signals", List.of("*.java")),
             new SourceSpec("decision/src/main/resources", List.of("decision-policy.yaml")),
             new SourceSpec(
                 "experiments/src/main/resources/experiments", List.of("*.yaml", "*.yml")),

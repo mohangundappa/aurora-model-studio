@@ -170,13 +170,24 @@ public class StructuralParser {
   }
 
   private List<Artifact> recognizedJava(Path root, Path path, String content) {
-    if ((!content.contains("SignalCalculator")
-            && !content.contains("extends CalculatorSupport")
-            && !content.contains("extends TextAffinityCalculator"))
-        || !content.contains("public String name()")) {
+    boolean calculator =
+        (content.contains("SignalCalculator")
+                || content.contains("extends CalculatorSupport")
+                || content.contains("extends TextAffinityCalculator"))
+            && content.contains("public String name()");
+    if (!calculator && identifiers(content, "table").isEmpty()) {
       return List.of();
     }
     String fileName = path.getFileName().toString().replaceFirst("\\.java$", "");
+    if (!calculator) {
+      return List.of(
+          parsedArtifact(
+              path,
+              "IMPLEMENTATION",
+              fileName,
+              content,
+              "implementation:source:" + root.relativize(path).toString().replace('\\', '/')));
+    }
     if (!fileName.endsWith("Calculator") || fileName.equals("SignalCalculator")) return List.of();
     String signal =
         fileName
@@ -273,12 +284,12 @@ public class StructuralParser {
 
   private List<String> identifiers(String content, String kind) {
     String marker = kind.equals("table") ? "table" : "column";
-    return Pattern.compile("(?i)\\b" + marker + "[\\s:=]+([a-zA-Z_][a-zA-Z0-9_]*)")
-        .matcher(content)
-        .results()
-        .map(match -> match.group(1))
-        .distinct()
-        .toList();
+    Pattern pattern =
+        kind.equals("table")
+            ? Pattern.compile(
+                "(?i)\\b(?:from|join|into|update|table)[\\s:=]+([a-zA-Z_][a-zA-Z0-9_]*)")
+            : Pattern.compile("(?i)\\b" + marker + "[\\s:=]+([a-zA-Z_][a-zA-Z0-9_]*)");
+    return pattern.matcher(content).results().map(match -> match.group(1)).distinct().toList();
   }
 
   private String hash(String content) {

@@ -77,7 +77,11 @@ public class KnowledgeService {
 
   @Transactional
   public KnowledgeObject create(Draft draft, String actor) {
-    validate(draft);
+    return create(draft, actor, true);
+  }
+
+  private KnowledgeObject create(Draft draft, String actor, boolean requireComplete) {
+    validate(draft, requireComplete);
     int version =
         repository.findLatest(draft.knowledgeKey()).map(KnowledgeObject::version).orElse(0) + 1;
     Map<String, Object> breakdown =
@@ -116,9 +120,14 @@ public class KnowledgeService {
   }
 
   public KnowledgeObject createExtracted(Draft draft, String actor, UUID invocationId) {
-    KnowledgeObject object = create(draft, actor);
+    KnowledgeObject object = createExtractedObject(draft, actor);
     repository.linkInvocation(object.id(), invocationId);
     return repository.findById(object.id()).orElseThrow();
+  }
+
+  @Transactional
+  private KnowledgeObject createExtractedObject(Draft draft, String actor) {
+    return create(draft, actor, false);
   }
 
   @Transactional
@@ -212,7 +221,7 @@ public class KnowledgeService {
             .toList();
     List<String> warnings =
         repository.conflicts(id).stream()
-            .filter(conflict -> conflict.status().name().equals("OPEN"))
+            .filter(conflict -> conflict.status().name().equals("OPEN") && conflict.blocking())
             .map(
                 conflict ->
                     "Open conflict on field " + conflict.field() + " caps confidence at 0.5")
@@ -268,7 +277,7 @@ public class KnowledgeService {
         confidence(
             breakdown,
             repository.conflicts(objectId).stream()
-                .anyMatch(c -> c.status().name().equals("OPEN")));
+                .anyMatch(c -> c.status().name().equals("OPEN") && c.blocking()));
     jdbc.update(
         "update knowledge_objects set confidence=?,confidence_breakdown=?::jsonb,quality_assessment=?::jsonb where client_id=? and id=?",
         confidence,
@@ -280,6 +289,20 @@ public class KnowledgeService {
         .filter(item -> item.id().equals(evidenceId))
         .findFirst()
         .orElseThrow();
+  }
+
+  @Transactional
+  public void linkReferencedDataAssets(UUID objectId, List<String> tableNames, UUID evidenceId) {
+    if (tableNames == null || tableNames.isEmpty()) return;
+    for (String tableName : tableNames) {
+      if (tableName == null || tableName.isBlank()) continue;
+      repository
+          .findDataAssetsByName(tableName)
+          .forEach(
+              dataAsset ->
+                  repository.addRelationshipIfAbsent(
+                      objectId, "DERIVED_FROM", dataAsset.id(), evidenceId));
+    }
   }
 
   public List<KnowledgePackage> governanceRules(String enforcementPoint) {
@@ -319,15 +342,21 @@ public class KnowledgeService {
   }
 
   private void validate(Draft draft) {
+    validate(draft, true);
+  }
+
+  private void validate(Draft draft, boolean requireComplete) {
     if (draft.knowledgeKey() == null || draft.knowledgeKey().isBlank())
       throw new IllegalArgumentException("knowledgeKey is required");
     if (draft.name() == null || draft.name().isBlank())
       throw new IllegalArgumentException("name is required");
     List<String> required = REQUIRED_FIELDS.get(draft.knowledgeType());
-    for (String field : required) {
-      if (!draft.attributes().containsKey(field) || draft.attributes().get(field) == null) {
-        throw new IllegalArgumentException(
-            "attributes." + field + " is required for " + draft.knowledgeType());
+    if (requireComplete) {
+      for (String field : required) {
+        if (!draft.attributes().containsKey(field) || draft.attributes().get(field) == null) {
+          throw new IllegalArgumentException(
+              "attributes." + field + " is required for " + draft.knowledgeType());
+        }
       }
     }
   }
@@ -344,6 +373,7 @@ public class KnowledgeService {
     result.put("completeness", completeness(type, attributes));
     result.put("recency", recency(knowledgeKey, evidence));
     result.put("executionEvidence", executionEvidence(attributes, evidence));
+    result.put("unknownFields", unknownFields(type, attributes));
     return result;
   }
 
@@ -420,6 +450,12 @@ public class KnowledgeService {
             .filter(field -> !(attributes.get(field) instanceof String value) || !value.isBlank())
             .count();
     return (double) populated / fields.size();
+  }
+
+  private List<String> unknownFields(KnowledgeType type, Map<String, Object> attributes) {
+    List<String> fields = new ArrayList<>(REQUIRED_FIELDS.get(type));
+    fields.addAll(RECOMMENDED_FIELDS.get(type));
+    return fields.stream().filter(field -> attributes.get(field) == null).toList();
   }
 
   private Double recency(String knowledgeKey, List<KnowledgeEvidence> evidence) {
@@ -537,10 +573,11 @@ public class KnowledgeService {
                 field);
         if (count == 0) {
           jdbc.update(
-              "insert into knowledge_conflicts(client_id,knowledge_object_id,field,values,status) values(?,?,?,?::jsonb,'OPEN')",
+              "insert into knowledge_conflicts(client_id,knowledge_object_id,field,conflict_class,values,status) values(?,?,?,?,?::jsonb,'OPEN')",
               ClientContext.require(),
               object.id(),
               field,
+              conflictClass(field),
               json(
                   Map.of(
                       "current", Map.of("value", currentValue, "evidenceId", evidenceId),
@@ -548,6 +585,10 @@ public class KnowledgeService {
         }
       }
     }
+  }
+
+  private String conflictClass(String field) {
+    return field.equals("businessDefinition") ? "DIVERGENT_DESCRIPTION" : "BLOCKING";
   }
 
   public record Draft(

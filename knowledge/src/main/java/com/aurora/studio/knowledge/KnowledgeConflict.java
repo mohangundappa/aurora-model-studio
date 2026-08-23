@@ -10,6 +10,22 @@ public record KnowledgeConflict(
     UUID clientId,
     UUID knowledgeObjectId,
     String field,
+    String conflictClass,
     Map<String, Object> values,
     KnowledgeConflictStatus status,
-    Instant detectedAt) {}
+    Instant detectedAt) {
+  public KnowledgeConflict(
+      UUID id,
+      UUID clientId,
+      UUID knowledgeObjectId,
+      String field,
+      Map<String, Object> values,
+      KnowledgeConflictStatus status,
+      Instant detectedAt) {
+    this(id, clientId, knowledgeObjectId, field, "BLOCKING", values, status, detectedAt);
+  }
+
+  public boolean blocking() {
+    return "BLOCKING".equals(conflictClass);
+  }
+}

@@ -3,8 +3,10 @@ package com.aurora.studio.knowledge;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 import com.aurora.studio.common.ClientContext;
@@ -227,6 +229,7 @@ class KnowledgeServiceTest {
             any(),
             any(),
             any(),
+            any(),
             any());
     org.mockito.Mockito.verify(jdbc)
         .update(
@@ -236,6 +239,88 @@ class KnowledgeServiceTest {
             any(),
             any(),
             any());
+  }
+
+  @Test
+  void classifiesDescriptionDivergenceWithoutBlockingClass() {
+    UUID id = UUID.randomUUID();
+    UUID evidenceId = UUID.randomUUID();
+    KnowledgeObject object = feature(id, Map.of("businessDefinition", "new"));
+    KnowledgeObject other = feature(UUID.randomUUID(), Map.of("businessDefinition", "old"));
+    KnowledgeEvidence evidence =
+        new KnowledgeEvidence(
+            evidenceId,
+            ClientContext.require(),
+            id,
+            "system",
+            "document",
+            "uri",
+            "v1",
+            "excerpt",
+            0.9,
+            java.time.Instant.now());
+    when(repository.findById(id)).thenReturn(Optional.of(object));
+    when(repository.addEvidence(
+            any(), anyString(), anyString(), anyString(), anyString(), anyString(), anyDouble()))
+        .thenReturn(evidenceId);
+    when(repository.evidence(id)).thenReturn(List.of(evidence));
+    when(repository.findByKeyExcluding(anyString(), any())).thenReturn(List.of(other));
+    when(repository.conflicts(id)).thenReturn(List.of());
+    when(jdbc.queryForObject(anyString(), eq(Integer.class), any(), any(), any())).thenReturn(0);
+
+    service.addEvidence(id, "system", "document", "uri", "v1", "excerpt", 0.9);
+
+    org.mockito.ArgumentCaptor<String> conflictClass = ArgumentCaptor.forClass(String.class);
+    org.mockito.Mockito.verify(jdbc)
+        .update(
+            org.mockito.ArgumentMatchers.contains("insert into knowledge_conflicts"),
+            any(),
+            any(),
+            any(),
+            conflictClass.capture(),
+            any());
+    assertThat(conflictClass.getValue()).isEqualTo("DIVERGENT_DESCRIPTION");
+  }
+
+  @Test
+  void classifiesComparableDifferencesAsBlocking() {
+    UUID id = UUID.randomUUID();
+    UUID evidenceId = UUID.randomUUID();
+    KnowledgeObject object = feature(id, Map.of("entity", "customer"));
+    KnowledgeObject other = feature(UUID.randomUUID(), Map.of("entity", "guest"));
+    KnowledgeEvidence evidence =
+        new KnowledgeEvidence(
+            evidenceId,
+            ClientContext.require(),
+            id,
+            "system",
+            "document",
+            "uri",
+            "v1",
+            "excerpt",
+            0.9,
+            java.time.Instant.now());
+    when(repository.findById(id)).thenReturn(Optional.of(object));
+    when(repository.addEvidence(
+            any(), anyString(), anyString(), anyString(), anyString(), anyString(), anyDouble()))
+        .thenReturn(evidenceId);
+    when(repository.evidence(id)).thenReturn(List.of(evidence));
+    when(repository.findByKeyExcluding(anyString(), any())).thenReturn(List.of(other));
+    when(repository.conflicts(id)).thenReturn(List.of());
+    when(jdbc.queryForObject(anyString(), eq(Integer.class), any(), any(), any())).thenReturn(0);
+
+    service.addEvidence(id, "system", "document", "uri", "v1", "excerpt", 0.9);
+
+    org.mockito.ArgumentCaptor<String> conflictClass = ArgumentCaptor.forClass(String.class);
+    org.mockito.Mockito.verify(jdbc, times(1))
+        .update(
+            org.mockito.ArgumentMatchers.contains("insert into knowledge_conflicts"),
+            any(),
+            any(),
+            any(),
+            conflictClass.capture(),
+            any());
+    assertThat(conflictClass.getValue()).isEqualTo("BLOCKING");
   }
 
   @Test

@@ -396,7 +396,7 @@ public class InitiativeService {
         }
         resolvedAssets.addAll(resolveDataAssets(feature, visibleById, base.includeCandidates()));
         if (knowledge.get(feature.id(), base.includeCandidates()).conflicts().stream()
-            .anyMatch(conflict -> conflict.status().name().equals("OPEN"))) {
+            .anyMatch(conflict -> conflict.status().name().equals("OPEN") && conflict.blocking())) {
           checks.add(
               new FeasibilityCheck(
                   "feature-conflict:" + value,

@@ -129,6 +129,8 @@ public class ExtractionService {
               artifact,
               synthetic ? "synthetic-legacy-estate" : "aurora-estate",
               sourceVersion);
+      knowledge.linkReferencedDataAssets(
+          object.id(), artifact.structuralFact().referencedTables(), evidence.id());
       persistProvenance(object, evidence, candidate.fields());
       candidates.add(object.id());
       counts.merge(object.knowledgeType().name(), 1, Integer::sum);
@@ -199,7 +201,7 @@ public class ExtractionService {
             artifact.structuralFact().name(),
             "hotel model development",
             "legacy knowledge extraction",
-            "Structurally parsed artifact " + artifact.structuralFact().name(),
+            artifact.excerpt(),
             Map.of(),
             Map.of(),
             List.of("extracted", "structural-" + type.name().toLowerCase()),
@@ -232,63 +234,16 @@ public class ExtractionService {
   }
 
   private Map<String, Object> baseAttributes(KnowledgeType type, Artifact artifact) {
-    String name = artifact.structuralFact().name();
-    Map<String, Object> attributes =
-        switch (type) {
-          case FEATURE ->
-              new LinkedHashMap<>(
-                  Map.of(
-                      "businessDefinition",
-                      "Structurally parsed signal " + name,
-                      "entity",
-                      "guest",
-                      "observationWindow",
-                      "source-defined",
-                      "pointInTimeAvailable",
-                      true,
-                      "inputs",
-                      artifact.structuralFact().inputs(),
-                      "sourceConstraints",
-                      Map.of("sourcePath", artifact.structuralFact().sourcePath())));
-          case DATA_ASSET ->
-              new LinkedHashMap<>(
-                  Map.of(
-                      "grain", "one source row",
-                      "primaryKey", "source-defined",
-                      "eventTime", "source-defined",
-                      "history", true));
-          case IMPLEMENTATION ->
-              new LinkedHashMap<>(
-                  Map.of(
-                      "languageOrKind",
-                      "source-defined implementation",
-                      "sourceTraceability",
-                      artifact.structuralFact().sourcePath()));
-          case STANDARD ->
-              new LinkedHashMap<>(
-                  Map.of(
-                      "rule", "Source-defined governance rule",
-                      "enforcementPoint", "knowledge extraction"));
-          case EXPERIMENT ->
-              new LinkedHashMap<>(
-                  Map.of(
-                      "hypothesis",
-                      "Source-defined hypothesis",
-                      "metrics",
-                      List.of("source-defined"),
-                      "sampleSizes",
-                      Map.of(),
-                      "decision",
-                      "human review required"));
-          case MODEL ->
-              new LinkedHashMap<>(
-                  Map.of(
-                      "objective", "Source-defined model objective",
-                      "scoredEntity", "guest",
-                      "targetEvent", "source-defined",
-                      "predictionHorizon", "source-defined",
-                      "cohort", "source-defined"));
-        };
+    Map<String, Object> attributes = new LinkedHashMap<>();
+    if (!artifact.structuralFact().referencedTables().isEmpty()) {
+      attributes.put("referencedTables", artifact.structuralFact().referencedTables());
+    }
+    if (type == KnowledgeType.IMPLEMENTATION) {
+      attributes.put(
+          "languageOrKind",
+          artifact.path().toString().toLowerCase().endsWith(".java") ? "Java" : "source");
+      attributes.put("sourceTraceability", artifact.structuralFact().sourcePath());
+    }
     Object sourceDeclared = artifact.structuralFact().inputs().get("sourceDeclared");
     if (sourceDeclared instanceof Map<?, ?> declared && !declared.isEmpty()) {
       attributes.put("sourceDeclared", declared);

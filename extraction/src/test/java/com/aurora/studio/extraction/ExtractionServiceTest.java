@@ -3,6 +3,7 @@ package com.aurora.studio.extraction;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -217,6 +218,95 @@ class ExtractionServiceTest {
     assertThat(draft.getValue().attributes())
         .containsEntry("sourceDeclared", Map.of("lifecycleStatus", "DEPLOYED", "confidence", 0.8));
     assertThat(draft.getValue().attributes()).doesNotContainKeys("lifecycleStatus", "confidence");
+    assertThat(draft.getValue().attributes())
+        .doesNotContainKeys(
+            "businessDefinition",
+            "entity",
+            "observationWindow",
+            "predictionHorizon",
+            "targetEvent",
+            "cohort",
+            "primaryKey",
+            "eventTime",
+            "scoredEntity");
+  }
+
+  @Test
+  void parsedTableReferencesCreateLineageAndNamesAloneDoNot() {
+    StructuralParser parser = new StructuralParser();
+    LlmGateway gateway = mock(LlmGateway.class);
+    KnowledgeService knowledge = mock(KnowledgeService.class);
+    KnowledgeRepository repository = mock(KnowledgeRepository.class);
+    UUID objectId = UUID.randomUUID();
+    KnowledgeObject object = mock(KnowledgeObject.class);
+    when(object.id()).thenReturn(objectId);
+    when(object.knowledgeType()).thenReturn(KnowledgeType.IMPLEMENTATION);
+    KnowledgeEvidence evidence =
+        new KnowledgeEvidence(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            objectId,
+            "test",
+            "source-file",
+            "calculator.java",
+            "v1",
+            "booking-intent",
+            1.0,
+            Instant.now());
+    when(gateway.complete(any()))
+        .thenReturn(
+            new LlmResult(
+                UUID.randomUUID(),
+                LlmOutcome.OK,
+                Map.of(
+                    "fields",
+                    List.of(
+                        Map.of(
+                            "field",
+                            "businessRationale",
+                            "value",
+                            "booking-intent",
+                            "citation",
+                            "booking-intent",
+                            "classification",
+                            "EVIDENCE_BACKED")),
+                    "relationships",
+                    List.of()),
+                null,
+                1,
+                1,
+                0,
+                1,
+                0));
+    when(knowledge.createExtracted(any(), any(), any())).thenReturn(object);
+    when(knowledge.addEvidence(any(), any(), any(), any(), any(), any(), anyDouble()))
+        .thenReturn(evidence);
+    Artifact parsed =
+        parser.artifact(
+            Path.of("calculator.java"),
+            "IMPLEMENTATION",
+            "booking-intent",
+            "booking-intent reads from raw_events");
+    Artifact similarName =
+        parser.artifact(
+            Path.of("other.java"),
+            "IMPLEMENTATION",
+            "raw_events",
+            "raw_events implementation has no source declaration");
+    assertThat(parsed.structuralFact().referencedTables()).containsExactly("raw_events");
+    assertThat(similarName.structuralFact().referencedTables()).isEmpty();
+
+    ClientContext.set(UUID.randomUUID());
+    try {
+      ExtractionService service =
+          new ExtractionService(parser, gateway, knowledge, repository, 0.72);
+      service.extractArtifacts(List.of(parsed), false);
+    } finally {
+      ClientContext.clear();
+    }
+
+    verify(knowledge)
+        .linkReferencedDataAssets(eq(objectId), eq(List.of("raw_events")), eq(evidence.id()));
   }
 
   @Test

@@ -342,6 +342,24 @@ public class KnowledgeRepository {
         evidenceId);
   }
 
+  public List<KnowledgeObject> findDataAssetsByName(String name) {
+    return jdbc.query(
+        "select * from knowledge_objects where client_id=? and knowledge_type='DATA_ASSET' and lower(name)=lower(?) order by version desc",
+        this::map,
+        ClientContext.require(),
+        name);
+  }
+
+  public void addRelationshipIfAbsent(UUID from, String type, UUID to, UUID evidenceId) {
+    jdbc.update(
+        "insert into knowledge_relationships(client_id,from_object_id,relationship_type,to_object_id,evidence_id) values(?,?,?,?,?) on conflict (client_id,from_object_id,relationship_type,to_object_id) do nothing",
+        ClientContext.require(),
+        from,
+        type,
+        to,
+        evidenceId);
+  }
+
   public List<KnowledgeConflict> conflicts(UUID objectId) {
     return jdbc.query(
         "select * from knowledge_conflicts where client_id=? and knowledge_object_id=?",
@@ -351,6 +369,7 @@ public class KnowledgeRepository {
                 rs.getObject("client_id", UUID.class),
                 rs.getObject("knowledge_object_id", UUID.class),
                 rs.getString("field"),
+                rs.getString("conflict_class"),
                 readMap(rs.getString("values")),
                 com.aurora.studio.common.KnowledgeConflictStatus.valueOf(rs.getString("status")),
                 rs.getTimestamp("detected_at").toInstant()),

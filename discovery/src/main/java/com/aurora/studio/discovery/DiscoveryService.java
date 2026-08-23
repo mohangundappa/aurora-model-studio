@@ -210,7 +210,7 @@ public class DiscoveryService {
     Double composite = composite(scorecard);
     List<String> blockers = new ArrayList<>();
     if (!pack.conflicts().stream()
-        .filter(conflict -> conflict.status().name().equals("OPEN"))
+        .filter(conflict -> conflict.status().name().equals("OPEN") && conflict.blocking())
         .toList()
         .isEmpty()) {
       blockers.add("OPEN_CONFLICT");
@@ -472,13 +472,14 @@ public class DiscoveryService {
                                               .stream()
                                               .noneMatch(
                                                   conflict ->
-                                                      conflict.status().name().equals("OPEN"))))
+                                                      conflict.status().name().equals("OPEN")
+                                                          && conflict.blocking())))
               .count();
       return available / (double) values.size();
     }
     if (object.knowledgeType().name().equals("FEATURE")) {
       return pack.conflicts().stream()
-              .noneMatch(conflict -> conflict.status().name().equals("OPEN"))
+              .noneMatch(conflict -> conflict.status().name().equals("OPEN") && conflict.blocking())
           ? 1.0
           : 0.0;
     }
