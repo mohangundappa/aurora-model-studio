@@ -32,20 +32,7 @@ public class OpenAiLlmAdapter implements LlmAdapter {
           LlmOutcome.FAILED, Map.of(), "OPENAI_API_KEY is not configured", 0, 0, 0, false);
     }
     try {
-      Map<String, Object> body =
-          Map.of(
-              "model",
-              model,
-              "messages",
-              List.of(Map.of("role", "user", "content", request.renderedPrompt())),
-              "response_format",
-              Map.of(
-                  "type",
-                  "json_schema",
-                  "json_schema",
-                  Map.of("name", request.taskId(), "schema", request.responseSchema())),
-              "max_completion_tokens",
-              request.maxOutputTokens());
+      Map<String, Object> body = requestBody(request);
       HttpRequest httpRequest =
           HttpRequest.newBuilder(endpoint)
               .timeout(request.timeout())
@@ -95,5 +82,21 @@ public class OpenAiLlmAdapter implements LlmAdapter {
       return new LlmAdapterResponse(
           LlmOutcome.FAILED, Map.of(), "OpenAI request failed", 0, 0, 0, true);
     }
+  }
+
+  Map<String, Object> requestBody(LlmRequest request) {
+    return Map.of(
+        "model",
+        model,
+        "messages",
+        List.of(Map.of("role", "user", "content", request.renderedPrompt())),
+        "response_format",
+        Map.of(
+            "type",
+            "json_schema",
+            "json_schema",
+            Map.of("name", request.taskId(), "strict", true, "schema", request.responseSchema())),
+        "max_completion_tokens",
+        request.maxOutputTokens());
   }
 }

@@ -15,7 +15,18 @@ public class GatewayConfiguration {
       @Value("${OPENAI_API_KEY:}") String apiKey,
       @Value("${studio.llm.model:gpt-4o-mini}") String model,
       @Value("${studio.llm.endpoint:https://api.openai.com/v1/chat/completions}") String endpoint) {
-    if ("openai".equalsIgnoreCase(provider) && !apiKey.isBlank()) {
+    if ("openai".equalsIgnoreCase(provider)) {
+      if (apiKey == null || apiKey.isBlank()) {
+        throw new IllegalStateException(
+            "OPENAI_API_KEY is required when studio.llm.provider=openai");
+      }
+      if (model == null || model.isBlank() || "deterministic".equalsIgnoreCase(model)) {
+        throw new IllegalStateException(
+            "studio.llm.model must name an OpenAI model when studio.llm.provider=openai"
+                + " (received: "
+                + model
+                + ")");
+      }
       return new OpenAiLlmAdapter(mapper, apiKey, model, URI.create(endpoint));
     }
     return new DeterministicLlmAdapter();

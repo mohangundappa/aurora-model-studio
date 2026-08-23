@@ -908,6 +908,56 @@ class InitiativeServiceTest {
   }
 
   @Test
+  void designRequestContainsGovernedMetadataAndTargetContext() {
+    KnowledgeObject asset =
+        dataAsset(
+            UUID.randomUUID(),
+            "custom_events",
+            List.of(),
+            Map.of(
+                "columns",
+                List.of(
+                    Map.of("name", "subject_key", "type", "VARCHAR(200)", "nullable", false),
+                    Map.of("name", "occurred_at", "type", "TIMESTAMPTZ", "nullable", false)),
+                "primaryKey",
+                "subject_key",
+                "eventTime",
+                "occurred_at"));
+    ModelRequirement requirement =
+        requirement(List.of("PURCHASED"), Map.of(), "14d", "batch", "customers");
+    InitiativeRepository.Attempt targeting =
+        attempt(attemptId, InitiativeStage.TARGETING_DESIGN, StageStatus.PENDING, 1);
+    InitiativeRepository.Attempt feasibility =
+        attempt(UUID.randomUUID(), InitiativeStage.DATA_FEASIBILITY, StageStatus.COMPLETED, 1);
+    prepareDesign(requirement, targeting, feasibility, List.of(asset));
+    when(gateway.complete(any())).thenReturn(llmResult(Map.of("drafts", List.of())));
+
+    service.runStage(initiativeId, InitiativeStage.TARGETING_DESIGN);
+
+    ArgumentCaptor<com.aurora.studio.gateway.LlmRequest> request =
+        ArgumentCaptor.forClass(com.aurora.studio.gateway.LlmRequest.class);
+    verify(gateway).complete(request.capture());
+    assertThat(request.getValue().resolvedPromptInputs())
+        .containsEntry("targetObservable", "definition")
+        .containsEntry(
+            "governedDataAssets",
+            List.of(
+                Map.of(
+                    "table",
+                    "custom_events",
+                    "columns",
+                    List.of(
+                        Map.of("name", "subject_key", "type", "VARCHAR(200)", "nullable", false),
+                        Map.of("name", "occurred_at", "type", "TIMESTAMPTZ", "nullable", false)),
+                    "entityColumn",
+                    "subject_key",
+                    "asOfColumn",
+                    "occurred_at")));
+    assertThat(request.getValue().renderedPrompt())
+        .contains("custom_events", "subject_key", "occurred_at", "definition", "14d");
+  }
+
+  @Test
   void providerFailureIsContainedAndInvocationIsRecorded() {
     KnowledgeObject asset = governedDataAsset(UUID.randomUUID(), "raw_events");
     ModelRequirement requirement =
