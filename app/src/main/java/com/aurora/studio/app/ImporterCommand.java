@@ -4,6 +4,7 @@ import com.aurora.studio.common.ClientContext;
 import com.aurora.studio.discovery.DiscoveryService;
 import com.aurora.studio.extraction.ExtractionService;
 import com.aurora.studio.importer.AuroraBackfillImporter;
+import com.aurora.studio.initiative.InitiativeService;
 import com.aurora.studio.knowledge.KnowledgeObject;
 import com.aurora.studio.knowledge.KnowledgeService;
 import java.nio.file.Path;
@@ -17,16 +18,19 @@ public class ImporterCommand implements CommandLineRunner {
   private final ExtractionService extraction;
   private final KnowledgeService knowledge;
   private final DiscoveryService discovery;
+  private final InitiativeService initiatives;
 
   public ImporterCommand(
       AuroraBackfillImporter importer,
       ExtractionService extraction,
       KnowledgeService knowledge,
-      DiscoveryService discovery) {
+      DiscoveryService discovery,
+      InitiativeService initiatives) {
     this.importer = importer;
     this.extraction = extraction;
     this.knowledge = knowledge;
     this.discovery = discovery;
+    this.initiatives = initiatives;
   }
 
   @Override
@@ -36,12 +40,14 @@ public class ImporterCommand implements CommandLineRunner {
     boolean extractionRequested = false;
     boolean syntheticRequested = false;
     boolean backfillEmbeddingsRequested = false;
+    boolean seedInitiativesRequested = false;
     String approvalList = null;
     for (int index = 0; index < args.length; index++) {
       if (args[index].equals("--import")) importRequested = true;
       if (args[index].equals("--extract")) extractionRequested = true;
       if (args[index].equals("--extract-synthetic")) syntheticRequested = true;
       if (args[index].equals("--backfill-embeddings")) backfillEmbeddingsRequested = true;
+      if (args[index].equals("--seed-initiatives")) seedInitiativesRequested = true;
       if (args[index].equals("--approve-curated") && index + 1 < args.length)
         approvalList = args[++index];
       if (args[index].equals("--aurora-repo") && index + 1 < args.length)
@@ -110,6 +116,31 @@ public class ImporterCommand implements CommandLineRunner {
       try {
         System.out.println(
             "Backfilled embeddings: " + discovery.backfillEmbeddings(true) + " objects");
+      } finally {
+        ClientContext.clear();
+      }
+    }
+    if (seedInitiativesRequested) {
+      ClientContext.set(AuroraBackfillImporter.IMPORT_CLIENT);
+      try {
+        initiatives
+            .seedDemo()
+            .forEach(initiative -> System.out.println("Seeded initiative: " + initiative.id()));
+      } finally {
+        ClientContext.clear();
+      }
+    }
+    if (!importRequested
+        && !extractionRequested
+        && !syntheticRequested
+        && !backfillEmbeddingsRequested
+        && approvalList == null
+        && !seedInitiativesRequested) {
+      ClientContext.set(AuroraBackfillImporter.IMPORT_CLIENT);
+      try {
+        initiatives
+            .seedDemo()
+            .forEach(initiative -> System.out.println("Seeded initiative: " + initiative.id()));
       } finally {
         ClientContext.clear();
       }

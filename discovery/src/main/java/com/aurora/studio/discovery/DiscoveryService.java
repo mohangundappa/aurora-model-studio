@@ -21,6 +21,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
@@ -91,6 +92,16 @@ public class DiscoveryService {
   public UUID register(ModelRequirement requirement) {
     validate(requirement);
     return repository.saveRequirement(requirement);
+  }
+
+  public ModelRequirement getRequirement(UUID requirementId) {
+    return repository
+        .findRequirement(requirementId)
+        .orElseThrow(() -> new IllegalArgumentException("Discovery requirement was not found"));
+  }
+
+  public Optional<UUID> findRequirementByUseCase(String businessUseCase) {
+    return repository.findRequirementByUseCase(businessUseCase);
   }
 
   @Transactional

@@ -1,0 +1,13 @@
+package com.aurora.studio.initiative;
+
+public enum InitiativeStage {
+  REQUIREMENT_INTAKE,
+  KNOWLEDGE_DISCOVERY,
+  REUSE_DECISION,
+  DATA_FEASIBILITY,
+  TARGETING_DESIGN,
+  FEATURE_DESIGN,
+  CANDIDATE_BUILD,
+  EXPERIMENT_DESIGN,
+  HANDOFF
+}

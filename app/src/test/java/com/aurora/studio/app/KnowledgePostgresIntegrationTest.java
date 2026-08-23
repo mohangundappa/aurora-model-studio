@@ -186,6 +186,65 @@ class KnowledgePostgresIntegrationTest {
   }
 
   @Test
+  void initiativeGatesRequireHumanApiAndInitiativeEventsAreAppendOnly() {
+    UUID requirement =
+        jdbc.queryForObject(
+            "insert into discovery_requirements(client_id,requirement) values(?, '{}'::jsonb) returning id",
+            UUID.class,
+            CLIENT);
+    UUID initiative =
+        jdbc.queryForObject(
+            "insert into initiatives(client_id,requirement_id) values(?,?) returning id",
+            UUID.class,
+            CLIENT,
+            requirement);
+    UUID attempt =
+        jdbc.queryForObject(
+            "insert into initiative_stage_attempts(client_id,initiative_id,stage,attempt,status) values(?,?,?,?,?) returning id",
+            UUID.class,
+            CLIENT,
+            initiative,
+            "REUSE_DECISION",
+            1,
+            "AWAITING_APPROVAL");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "insert into initiative_gate_decisions(client_id,initiative_id,stage_attempt_id,stage,decision,actor) values(?,?,?,?,?,?)",
+                    CLIENT,
+                    initiative,
+                    attempt,
+                    "REUSE_DECISION",
+                    "APPROVE",
+                    "initiative-orchestrator"))
+        .isInstanceOf(DataAccessException.class)
+        .hasMessageContaining("human gate API");
+    jdbc.update(
+        "insert into initiative_events(client_id,initiative_id,stage,to_status,actor) values(?,?,?,?,?)",
+        CLIENT,
+        initiative,
+        "REUSE_DECISION",
+        "IN_PROGRESS",
+        "initiative-orchestrator");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "update initiative_events set reason='tampered' where client_id=? and initiative_id=?",
+                    CLIENT,
+                    initiative))
+        .isInstanceOf(DataAccessException.class)
+        .hasMessageContaining("append-only");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "delete from initiative_events where client_id=? and initiative_id=?",
+                    CLIENT,
+                    initiative))
+        .isInstanceOf(DataAccessException.class)
+        .hasMessageContaining("append-only");
+  }
+
+  @Test
   void extractionCandidateReferencesSuccessfulInvocationAndRemainsExtracted() {
     StructuralParser parser = new StructuralParser();
     var artifact =
