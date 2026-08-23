@@ -2,6 +2,7 @@ package com.aurora.studio.knowledge;
 
 import com.aurora.studio.common.ClientContext;
 import com.aurora.studio.common.KnowledgeType;
+import com.aurora.studio.common.ValidationException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
@@ -34,7 +35,7 @@ public class KnowledgeService {
           KnowledgeType.DATA_ASSET,
           List.of("grain", "primaryKey", "eventTime", "history"),
           KnowledgeType.IMPLEMENTATION,
-          List.of("languageOrKind", "sourceTraceability"),
+          List.of("language", "sourceTraceability"),
           KnowledgeType.EXPERIMENT,
           List.of("hypothesis", "metrics", "sampleSizes", "decision"),
           KnowledgeType.STANDARD,
@@ -395,14 +396,14 @@ public class KnowledgeService {
 
   private void validate(Draft draft, boolean requireComplete) {
     if (draft.knowledgeKey() == null || draft.knowledgeKey().isBlank())
-      throw new IllegalArgumentException("knowledgeKey is required");
+      throw new ValidationException("knowledgeKey is required");
     if (draft.name() == null || draft.name().isBlank())
-      throw new IllegalArgumentException("name is required");
+      throw new ValidationException("name is required");
     List<String> required = REQUIRED_FIELDS.get(draft.knowledgeType());
     if (requireComplete) {
       for (String field : required) {
         if (!draft.attributes().containsKey(field) || draft.attributes().get(field) == null) {
-          throw new IllegalArgumentException(
+          throw new ValidationException(
               "attributes." + field + " is required for " + draft.knowledgeType());
         }
       }
@@ -677,7 +678,8 @@ public class KnowledgeService {
             "targetEvent",
             "predictionHorizon",
             "grain",
-            "measurementUnit"));
+            "measurementUnit",
+            "implementationKind"));
     return fields.stream().toList();
   }
 

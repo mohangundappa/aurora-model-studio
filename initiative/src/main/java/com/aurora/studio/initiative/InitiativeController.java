@@ -1,5 +1,7 @@
 package com.aurora.studio.initiative;
 
+import com.aurora.studio.common.ResourceNotFoundException;
+import com.aurora.studio.common.ValidationException;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -50,9 +52,21 @@ public class InitiativeController {
     return service.decide(id, stage, request);
   }
 
-  @ExceptionHandler(IllegalArgumentException.class)
+  @ExceptionHandler(ResourceNotFoundException.class)
   @ResponseStatus(HttpStatus.NOT_FOUND)
-  public ErrorResponse notFound(IllegalArgumentException exception) {
+  public ErrorResponse notFound(ResourceNotFoundException exception) {
+    return new ErrorResponse(exception.getMessage());
+  }
+
+  @ExceptionHandler(ValidationException.class)
+  @ResponseStatus(HttpStatus.BAD_REQUEST)
+  public ErrorResponse validation(ValidationException exception) {
+    return new ErrorResponse(exception.getMessage());
+  }
+
+  @ExceptionHandler(StageAlreadyRunningException.class)
+  @ResponseStatus(HttpStatus.CONFLICT)
+  public ErrorResponse conflict(StageAlreadyRunningException exception) {
     return new ErrorResponse(exception.getMessage());
   }
 

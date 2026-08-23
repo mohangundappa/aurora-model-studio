@@ -98,6 +98,20 @@ class AuroraBackfillImporterIntegrationTest {
                 CLIENT,
                 "feature:booking-intent"))
         .isEqualTo("DEPLOYED");
+    assertThat(
+            jdbc.queryForObject(
+                "select attributes->>'language' from knowledge_objects where client_id=? and knowledge_key=?",
+                String.class,
+                CLIENT,
+                "implementation:calculator:booking-intent"))
+        .isEqualTo("Java");
+    assertThat(
+            jdbc.queryForObject(
+                "select attributes->>'implementationKind' from knowledge_objects where client_id=? and knowledge_key=?",
+                String.class,
+                CLIENT,
+                "implementation:calculator:booking-intent"))
+        .isEqualTo("Spring calculator bean");
 
     AuroraBackfillImporter.ImportResult second = importer.importRepository(fixture);
     assertThat(second.counts()).isEmpty();
