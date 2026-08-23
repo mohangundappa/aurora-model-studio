@@ -292,7 +292,7 @@ class KnowledgeServiceTest {
     when(repository.relationships(dependency)).thenReturn(List.of());
     when(repository.relationships(dependent)).thenReturn(List.of());
 
-    KnowledgeService.Impact result = service.analyzeImpact(root, 1);
+    KnowledgeService.Impact result = service.analyzeImpact(root, 1, true);
 
     assertThat(result.dependsOn())
         .extracting(KnowledgeService.ImpactPath::objectId)

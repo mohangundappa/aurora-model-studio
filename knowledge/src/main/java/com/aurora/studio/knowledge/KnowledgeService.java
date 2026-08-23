@@ -230,10 +230,6 @@ public class KnowledgeService {
     return repository.evidence(id);
   }
 
-  public List<KnowledgeEvidence> getSourceEvidence(UUID id) {
-    return getSourceEvidence(id, true);
-  }
-
   @Transactional
   public KnowledgeEvidence addEvidence(
       UUID objectId,
@@ -304,10 +300,6 @@ public class KnowledgeService {
       }
     }
     return new Impact(id, boundedDepth, dependsOn, dependents);
-  }
-
-  public Impact analyzeImpact(UUID id, int depth) {
-    return analyzeImpact(id, depth, true);
   }
 
   private void validate(Draft draft) {
