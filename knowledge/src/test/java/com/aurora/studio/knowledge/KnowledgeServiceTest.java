@@ -3,8 +3,10 @@ package com.aurora.studio.knowledge;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 import com.aurora.studio.common.ClientContext;
@@ -177,6 +179,164 @@ class KnowledgeServiceTest {
   }
 
   @Test
+  void approvalRejectsIncompleteKnowledgeAndNamesMissingFields() {
+    UUID id = UUID.randomUUID();
+    KnowledgeObject object =
+        new KnowledgeObject(
+            id,
+            ClientContext.require(),
+            "feature:incomplete",
+            1,
+            KnowledgeType.FEATURE,
+            "Incomplete",
+            "domain",
+            "use-case",
+            "description",
+            Map.of(),
+            Map.of(),
+            List.of(),
+            "PENDING_REVIEW",
+            null,
+            null,
+            0.2,
+            Map.of(),
+            Map.of(),
+            null,
+            "actor",
+            null,
+            null,
+            null,
+            Map.of("businessDefinition", "definition"),
+            false);
+    when(repository.findById(id)).thenReturn(Optional.of(object));
+    when(repository.evidence(id))
+        .thenReturn(
+            List.of(
+                new KnowledgeEvidence(
+                    UUID.randomUUID(),
+                    ClientContext.require(),
+                    id,
+                    "system",
+                    "source-file",
+                    "uri",
+                    "v1",
+                    "excerpt",
+                    1.0,
+                    Instant.now())));
+
+    assertThatThrownBy(() -> service.approve(id, "actor", null))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("entity")
+        .hasMessageContaining("observationWindow")
+        .hasMessageContaining("pointInTimeAvailable");
+  }
+
+  @Test
+  void governedComparableDifferenceIsBlocking() {
+    UUID id = UUID.randomUUID();
+    KnowledgeObject implementation =
+        new KnowledgeObject(
+            id,
+            ClientContext.require(),
+            "implementation:loyalty",
+            1,
+            KnowledgeType.IMPLEMENTATION,
+            "Loyalty implementation",
+            "domain",
+            "use-case",
+            "implementation",
+            Map.of(),
+            Map.of(),
+            List.of(),
+            "EXTRACTED",
+            null,
+            null,
+            0.7,
+            Map.of(),
+            Map.of(),
+            null,
+            "actor",
+            null,
+            null,
+            null,
+            Map.of("measurementUnit", "months"),
+            false);
+    KnowledgeObject specification =
+        new KnowledgeObject(
+            UUID.randomUUID(),
+            ClientContext.require(),
+            "standard:loyalty",
+            1,
+            KnowledgeType.STANDARD,
+            "Loyalty specification",
+            "domain",
+            "use-case",
+            "specification",
+            Map.of(),
+            Map.of(),
+            List.of(),
+            "EXTRACTED",
+            null,
+            null,
+            0.7,
+            Map.of(),
+            Map.of(),
+            null,
+            "actor",
+            null,
+            null,
+            null,
+            Map.of("measurementUnit", "years", "governedRole", "SPECIFICATION"),
+            false);
+    KnowledgeEvidence evidence =
+        new KnowledgeEvidence(
+            UUID.randomUUID(),
+            ClientContext.require(),
+            id,
+            "system",
+            "source-file",
+            "uri",
+            "v1",
+            "excerpt",
+            1.0,
+            Instant.now());
+    when(repository.findById(id)).thenReturn(Optional.of(implementation));
+    when(repository.findById(specification.id())).thenReturn(Optional.of(specification));
+    when(repository.addEvidence(
+            any(), anyString(), anyString(), anyString(), anyString(), anyString(), anyDouble()))
+        .thenReturn(evidence.id());
+    when(repository.evidence(id)).thenReturn(List.of(evidence));
+    when(repository.findByKeyExcluding(anyString(), any())).thenReturn(List.of());
+    when(repository.relationships(id))
+        .thenReturn(
+            List.of(
+                new KnowledgeRelationship(
+                    UUID.randomUUID(),
+                    ClientContext.require(),
+                    id,
+                    RelationshipType.GOVERNED_BY,
+                    specification.id(),
+                    null)));
+    when(repository.conflicts(id)).thenReturn(List.of());
+    when(repository.newestEvidenceForKey(anyString()))
+        .thenReturn(Optional.of(evidence.recordedAt()));
+    when(jdbc.queryForObject(anyString(), eq(Integer.class), any(), any(), any())).thenReturn(0);
+
+    service.addEvidence(id, "system", "source-file", "uri", "v1", "excerpt", 1.0);
+
+    ArgumentCaptor<String> conflictClass = ArgumentCaptor.forClass(String.class);
+    org.mockito.Mockito.verify(jdbc)
+        .update(
+            org.mockito.ArgumentMatchers.contains("insert into knowledge_conflicts"),
+            any(),
+            any(),
+            any(),
+            conflictClass.capture(),
+            any());
+    assertThat(conflictClass.getValue()).isEqualTo("BLOCKING");
+  }
+
+  @Test
   void recordsOpenConflictAndCapsConfidenceWhenEvidenceDisagrees() {
     UUID id = UUID.randomUUID();
     UUID evidenceId = UUID.randomUUID();
@@ -227,6 +387,7 @@ class KnowledgeServiceTest {
             any(),
             any(),
             any(),
+            any(),
             any());
     org.mockito.Mockito.verify(jdbc)
         .update(
@@ -236,6 +397,88 @@ class KnowledgeServiceTest {
             any(),
             any(),
             any());
+  }
+
+  @Test
+  void classifiesDescriptionDivergenceWithoutBlockingClass() {
+    UUID id = UUID.randomUUID();
+    UUID evidenceId = UUID.randomUUID();
+    KnowledgeObject object = feature(id, Map.of("businessDefinition", "new"));
+    KnowledgeObject other = feature(UUID.randomUUID(), Map.of("businessDefinition", "old"));
+    KnowledgeEvidence evidence =
+        new KnowledgeEvidence(
+            evidenceId,
+            ClientContext.require(),
+            id,
+            "system",
+            "document",
+            "uri",
+            "v1",
+            "excerpt",
+            0.9,
+            java.time.Instant.now());
+    when(repository.findById(id)).thenReturn(Optional.of(object));
+    when(repository.addEvidence(
+            any(), anyString(), anyString(), anyString(), anyString(), anyString(), anyDouble()))
+        .thenReturn(evidenceId);
+    when(repository.evidence(id)).thenReturn(List.of(evidence));
+    when(repository.findByKeyExcluding(anyString(), any())).thenReturn(List.of(other));
+    when(repository.conflicts(id)).thenReturn(List.of());
+    when(jdbc.queryForObject(anyString(), eq(Integer.class), any(), any(), any())).thenReturn(0);
+
+    service.addEvidence(id, "system", "document", "uri", "v1", "excerpt", 0.9);
+
+    org.mockito.ArgumentCaptor<String> conflictClass = ArgumentCaptor.forClass(String.class);
+    org.mockito.Mockito.verify(jdbc)
+        .update(
+            org.mockito.ArgumentMatchers.contains("insert into knowledge_conflicts"),
+            any(),
+            any(),
+            any(),
+            conflictClass.capture(),
+            any());
+    assertThat(conflictClass.getValue()).isEqualTo("DIVERGENT_DESCRIPTION");
+  }
+
+  @Test
+  void classifiesComparableDifferencesAsBlocking() {
+    UUID id = UUID.randomUUID();
+    UUID evidenceId = UUID.randomUUID();
+    KnowledgeObject object = feature(id, Map.of("entity", "customer"));
+    KnowledgeObject other = feature(UUID.randomUUID(), Map.of("entity", "guest"));
+    KnowledgeEvidence evidence =
+        new KnowledgeEvidence(
+            evidenceId,
+            ClientContext.require(),
+            id,
+            "system",
+            "document",
+            "uri",
+            "v1",
+            "excerpt",
+            0.9,
+            java.time.Instant.now());
+    when(repository.findById(id)).thenReturn(Optional.of(object));
+    when(repository.addEvidence(
+            any(), anyString(), anyString(), anyString(), anyString(), anyString(), anyDouble()))
+        .thenReturn(evidenceId);
+    when(repository.evidence(id)).thenReturn(List.of(evidence));
+    when(repository.findByKeyExcluding(anyString(), any())).thenReturn(List.of(other));
+    when(repository.conflicts(id)).thenReturn(List.of());
+    when(jdbc.queryForObject(anyString(), eq(Integer.class), any(), any(), any())).thenReturn(0);
+
+    service.addEvidence(id, "system", "document", "uri", "v1", "excerpt", 0.9);
+
+    org.mockito.ArgumentCaptor<String> conflictClass = ArgumentCaptor.forClass(String.class);
+    org.mockito.Mockito.verify(jdbc, times(1))
+        .update(
+            org.mockito.ArgumentMatchers.contains("insert into knowledge_conflicts"),
+            any(),
+            any(),
+            any(),
+            conflictClass.capture(),
+            any());
+    assertThat(conflictClass.getValue()).isEqualTo("BLOCKING");
   }
 
   @Test

@@ -10,6 +10,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.aurora.studio.common.ClientContext;
 import com.aurora.studio.extraction.ExtractionService;
 import com.aurora.studio.extraction.StructuralParser;
+import com.aurora.studio.initiative.InitiativeRepository;
+import com.aurora.studio.initiative.InitiativeStage;
+import com.aurora.studio.initiative.StageStatus;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
@@ -47,6 +50,7 @@ class KnowledgePostgresIntegrationTest {
 
   @Autowired JdbcTemplate jdbc;
   @Autowired ExtractionService extraction;
+  @Autowired InitiativeRepository initiatives;
   @Autowired MockMvc mockMvc;
 
   @DynamicPropertySource
@@ -183,6 +187,83 @@ class KnowledgePostgresIntegrationTest {
                     "delete from llm_invocations where client_id=? and id=?", CLIENT, invocation))
         .isInstanceOf(DataAccessException.class)
         .hasMessageContaining("append-only");
+  }
+
+  @Test
+  void initiativeGatesRequireHumanApiAndInitiativeEventsAreAppendOnly() {
+    UUID requirement =
+        jdbc.queryForObject(
+            "insert into discovery_requirements(client_id,requirement) values(?, '{}'::jsonb) returning id",
+            UUID.class,
+            CLIENT);
+    UUID initiative =
+        jdbc.queryForObject(
+            "insert into initiatives(client_id,requirement_id) values(?,?) returning id",
+            UUID.class,
+            CLIENT,
+            requirement);
+    UUID attempt =
+        jdbc.queryForObject(
+            "insert into initiative_stage_attempts(client_id,initiative_id,stage,attempt,status) values(?,?,?,?,?) returning id",
+            UUID.class,
+            CLIENT,
+            initiative,
+            "REUSE_DECISION",
+            1,
+            "AWAITING_APPROVAL");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "insert into initiative_gate_decisions(client_id,initiative_id,stage_attempt_id,stage,decision,actor) values(?,?,?,?,?,?)",
+                    CLIENT,
+                    initiative,
+                    attempt,
+                    "REUSE_DECISION",
+                    "APPROVE",
+                    "initiative-orchestrator"))
+        .isInstanceOf(DataAccessException.class)
+        .hasMessageContaining("human gate API");
+    jdbc.update(
+        "insert into initiative_events(client_id,initiative_id,stage,to_status,actor) values(?,?,?,?,?)",
+        CLIENT,
+        initiative,
+        "REUSE_DECISION",
+        "IN_PROGRESS",
+        "initiative-orchestrator");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "update initiative_events set reason='tampered' where client_id=? and initiative_id=?",
+                    CLIENT,
+                    initiative))
+        .isInstanceOf(DataAccessException.class)
+        .hasMessageContaining("append-only");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "delete from initiative_events where client_id=? and initiative_id=?",
+                    CLIENT,
+                    initiative))
+        .isInstanceOf(DataAccessException.class)
+        .hasMessageContaining("append-only");
+  }
+
+  @Test
+  void candidateBuildIsPersistedAsOutOfScope() {
+    UUID requirement =
+        jdbc.queryForObject(
+            "insert into discovery_requirements(client_id,requirement) values(?, '{}'::jsonb) returning id",
+            UUID.class,
+            CLIENT);
+    UUID initiative = initiatives.create(requirement, false, null);
+    String status =
+        jdbc.queryForObject(
+            "select status from initiative_stage_attempts where client_id=? and initiative_id=? and stage=?",
+            String.class,
+            CLIENT,
+            initiative,
+            InitiativeStage.CANDIDATE_BUILD.name());
+    assertThat(status).isEqualTo(StageStatus.OUT_OF_SCOPE.name());
   }
 
   @Test

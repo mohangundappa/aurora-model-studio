@@ -38,6 +38,17 @@ public class DiscoveryRepository {
         .findFirst();
   }
 
+  public Optional<UUID> findRequirementByUseCase(String businessUseCase) {
+    return jdbc
+        .query(
+            "select id from discovery_requirements where client_id=? and requirement->>'businessUseCase'=? order by created_at limit 1",
+            (rs, row) -> rs.getObject("id", UUID.class),
+            ClientContext.require(),
+            businessUseCase)
+        .stream()
+        .findFirst();
+  }
+
   public UUID saveRun(
       UUID runId,
       UUID requirementId,

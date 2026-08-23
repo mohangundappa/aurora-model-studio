@@ -15,12 +15,28 @@ final class SyntheticLegacyEstate {
                     Path.of("legacy/models/loyalty-tenure.sql"),
                     "DATA_ASSET",
                     "loyalty-tenure",
-                    "CREATE TABLE loyalty_tenure (guest_id uuid, tenure_months integer);"),
+                    "governedSubject: loyalty-tenure\n"
+                        + "governedRole: DATA_ASSET\n"
+                        + "measurementUnit: months\n"
+                        + "CREATE TABLE loyalty_tenure (guest_id uuid, tenure_months integer);"),
                 parser.artifact(
                     Path.of("legacy/models/loyalty-tenure-spec.md"),
                     "STANDARD",
                     "loyalty-tenure-spec",
-                    "The loyalty-tenure specification defines tenure_months as completed calendar years."),
+                    "name: loyalty-tenure-spec\n"
+                        + "governedSubject: loyalty-tenure\n"
+                        + "governedRole: SPECIFICATION\n"
+                        + "measurementUnit: years\n"
+                        + "The loyalty-tenure specification defines tenure_months as completed calendar years."),
+                parser.artifact(
+                    Path.of("legacy/implementations/loyalty-tenure.java"),
+                    "IMPLEMENTATION",
+                    "loyalty-tenure-implementation",
+                    "name: loyalty-tenure-implementation\n"
+                        + "governedSubject: loyalty-tenure\n"
+                        + "governedRole: IMPLEMENTATION\n"
+                        + "measurementUnit: months\n"
+                        + "The implementation measures loyalty tenure from tenure_months."),
                 parser.artifact(
                     Path.of("legacy/models/guest-value.yaml"),
                     "FEATURE",
@@ -93,7 +109,11 @@ final class SyntheticLegacyEstate {
             Path.of("legacy/docs/stale-loyalty-tenure.md"),
             "STANDARD",
             "stale-loyalty-tenure",
-            "The stale loyalty-tenure specification says tenure is measured in months."));
+            "name: stale-loyalty-tenure\n"
+                + "governedSubject: loyalty-tenure\n"
+                + "governedRole: SPECIFICATION\n"
+                + "measurementUnit: months\n"
+                + "The stale loyalty-tenure specification says tenure is measured in months."));
     return artifacts;
   }
 }

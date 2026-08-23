@@ -58,12 +58,13 @@ public class StructuralParser {
 
   public Artifact artifact(Path path, String kind, String name, String content) {
     String excerpt = content.substring(0, Math.min(1200, content.length()));
+    Map<String, Object> structuralAttributes = structuralAttributes(content);
     StructuralFact fact =
         new StructuralFact(
             name,
             kind,
             name,
-            Map.of("contentLength", content.length()),
+            structuralAttributes,
             identifiers(content, "table"),
             identifiers(content, "column"),
             path.toString(),
@@ -170,13 +171,24 @@ public class StructuralParser {
   }
 
   private List<Artifact> recognizedJava(Path root, Path path, String content) {
-    if ((!content.contains("SignalCalculator")
-            && !content.contains("extends CalculatorSupport")
-            && !content.contains("extends TextAffinityCalculator"))
-        || !content.contains("public String name()")) {
+    boolean calculator =
+        (content.contains("SignalCalculator")
+                || content.contains("extends CalculatorSupport")
+                || content.contains("extends TextAffinityCalculator"))
+            && content.contains("public String name()");
+    if (!calculator && identifiers(content, "table").isEmpty()) {
       return List.of();
     }
     String fileName = path.getFileName().toString().replaceFirst("\\.java$", "");
+    if (!calculator) {
+      return List.of(
+          parsedArtifact(
+              path,
+              "IMPLEMENTATION",
+              fileName,
+              content,
+              "implementation:source:" + root.relativize(path).toString().replace('\\', '/')));
+    }
     if (!fileName.endsWith("Calculator") || fileName.equals("SignalCalculator")) return List.of();
     String signal =
         fileName
@@ -200,7 +212,7 @@ public class StructuralParser {
       Path path, String kind, String name, String content, String key, String sourceHash) {
     String excerpt = content.substring(0, Math.min(1200, content.length()));
     Map<String, Object> structuralAttributes = new java.util.LinkedHashMap<>();
-    structuralAttributes.put("contentLength", content.length());
+    structuralAttributes.putAll(structuralAttributes(content));
     Map<String, Object> sourceDeclared = sourceDeclaredGovernance(content);
     if (!sourceDeclared.isEmpty()) structuralAttributes.put("sourceDeclared", sourceDeclared);
     StructuralFact fact =
@@ -215,6 +227,22 @@ public class StructuralParser {
             sourceHash,
             excerpt);
     return new Artifact(path, kind, name, excerpt, fact, key);
+  }
+
+  private Map<String, Object> structuralAttributes(String content) {
+    Map<String, Object> attributes = new java.util.LinkedHashMap<>();
+    attributes.put("contentLength", content.length());
+    for (String field : List.of("governedSubject", "governedRole", "measurementUnit")) {
+      Matcher matcher =
+          Pattern.compile("(?im)^\\s*" + field + "\\s*[:=]\\s*([^\\s#]+)\\s*$").matcher(content);
+      if (matcher.find()) attributes.put(field, matcher.group(1).trim());
+    }
+    if (content.contains("registry.definitions()")) {
+      attributes.put("governsRegisteredFeatures", true);
+    }
+    Map<String, Object> sourceDeclared = sourceDeclaredGovernance(content);
+    if (!sourceDeclared.isEmpty()) attributes.put("sourceDeclared", sourceDeclared);
+    return attributes;
   }
 
   private Map<String, Object> sourceDeclaredGovernance(String content) {
@@ -273,12 +301,12 @@ public class StructuralParser {
 
   private List<String> identifiers(String content, String kind) {
     String marker = kind.equals("table") ? "table" : "column";
-    return Pattern.compile("(?i)\\b" + marker + "[\\s:=]+([a-zA-Z_][a-zA-Z0-9_]*)")
-        .matcher(content)
-        .results()
-        .map(match -> match.group(1))
-        .distinct()
-        .toList();
+    Pattern pattern =
+        kind.equals("table")
+            ? Pattern.compile(
+                "(?i)\\b(?:from|join|into|update|table)[\\s:=]+([a-zA-Z_][a-zA-Z0-9_]*)")
+            : Pattern.compile("(?i)\\b" + marker + "[\\s:=]+([a-zA-Z_][a-zA-Z0-9_]*)");
+    return pattern.matcher(content).results().map(match -> match.group(1)).distinct().toList();
   }
 
   private String hash(String content) {

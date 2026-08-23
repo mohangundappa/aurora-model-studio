@@ -24,6 +24,7 @@
     <module>importer</module>
     <module>extraction</module>
     <module>discovery</module>
+    <module>initiative</module>
     <module>app</module>
   </modules>
   <dependencyManagement>
