@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -68,5 +69,31 @@ class StructuralParserTest {
 
     assertThat(result.artifacts()).isEmpty();
     assertThat(result.skippedArtifacts()).isEqualTo(1);
+  }
+
+  @Test
+  void sourceDeclaredGovernanceIsKeptSeparateFromStructuralAttributes(@TempDir Path root)
+      throws Exception {
+    Files.writeString(
+        root.resolve("signal.yaml"),
+        """
+        name: booking-intent
+        inputs: [ROOM_VIEWED]
+        calculationType: RULE
+        lifecycleStatus: DEPLOYED
+        confidence: 0.8
+        """);
+
+    Artifact artifact =
+        parser
+            .parseResult(
+                root,
+                new ExtractionSourceSelection(
+                    List.of(new ExtractionSourceSelection.SourceSpec(".", List.of("*.yaml")))))
+            .artifacts()
+            .getFirst();
+
+    assertThat(artifact.structuralFact().inputs())
+        .containsEntry("sourceDeclared", Map.of("lifecycleStatus", "DEPLOYED", "confidence", 0.8));
   }
 }

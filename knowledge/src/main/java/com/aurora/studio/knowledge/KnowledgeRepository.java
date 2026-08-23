@@ -149,12 +149,16 @@ public class KnowledgeRepository {
   }
 
   public List<KnowledgeObject> searchGovernanceRules(String enforcementPoint) {
-    return jdbc.query(
-        "select * from knowledge_objects where client_id=? and knowledge_type='STANDARD' and lifecycle_status='APPROVED' and (? is null or attributes->>'enforcementPoint'=?) order by knowledge_key,version desc",
-        this::map,
-        ClientContext.require(),
-        enforcementPoint,
-        enforcementPoint);
+    String sql =
+        "select * from knowledge_objects where client_id=? and knowledge_type='STANDARD' and lifecycle_status='APPROVED'";
+    List<Object> parameters = new ArrayList<>();
+    parameters.add(ClientContext.require());
+    if (enforcementPoint != null) {
+      sql += " and attributes->>'enforcementPoint'=?";
+      parameters.add(enforcementPoint);
+    }
+    sql += " order by knowledge_key,version desc";
+    return jdbc.query(sql, this::map, parameters.toArray());
   }
 
   public List<KnowledgeEvidence> evidence(UUID objectId) {

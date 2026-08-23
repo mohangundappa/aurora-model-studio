@@ -14,6 +14,13 @@ attributes improve completeness but are not required. Evidence records the sourc
 system, source type, URI, resolved source version, excerpt, extraction certainty, and
 recorded timestamp. Candidates without evidence cannot be approved.
 
+Source artifacts may declare their own lifecycle or review metadata. The importer and
+extraction path preserve those values only under `attributes.sourceDeclared`; they are
+descriptive source metadata, never Model Studio governance. The authoritative lifecycle,
+confidence, approval, and reviewer columns are populated and enforced by Model Studio
+itself, so a source-declared `APPROVED` or confidence value cannot make a candidate
+trusted.
+
 Relationships refer to exact object versions. A relationship from `A` to `B` means
 that `A` depends on `B`; impact results therefore label outgoing paths `DEPENDS_ON`
 and incoming paths `DEPENDENT`. Traversal is bounded to five hops, cycle-safe, and
