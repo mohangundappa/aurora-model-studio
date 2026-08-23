@@ -53,7 +53,7 @@ class InitiativeServiceTest {
     service.runStage(initiativeId, InitiativeStage.REUSE_DECISION);
 
     verify(repository).awaitApproval(eq(attemptId), any(), eq(0L), eq(List.of()), eq(List.of()));
-    verify(repository, never()).insertGateDecision(any(), any(), any(), any(), any(), any());
+    verify(repository, never()).insertGateDecision(any(), any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -91,7 +91,8 @@ class InitiativeServiceTest {
             InitiativeStage.REUSE_DECISION,
             "REJECT",
             "reviewer",
-            "Evidence is insufficient");
+            "Evidence is insufficient",
+            List.of());
     verify(repository)
         .finish(
             eq(attemptId),
@@ -419,19 +420,168 @@ class InitiativeServiceTest {
     org.mockito.ArgumentCaptor<List<FeasibilityCheck>> checks =
         org.mockito.ArgumentCaptor.forClass(List.class);
     verify(repository)
-        .finish(
-            eq(attemptId),
-            eq(StageStatus.COMPLETED),
-            any(),
-            anyLong(),
-            eq(0L),
-            eq(List.of()),
-            checks.capture(),
-            any());
+        .awaitApproval(eq(attemptId), any(), anyLong(), eq(List.of()), checks.capture(), any());
     assertThat(checks.getValue())
         .filteredOn(check -> check.name().startsWith("data-history"))
         .singleElement()
         .satisfies(check -> assertThat(check.status()).isEqualTo("UNKNOWN"));
+  }
+
+  @Test
+  void unknownFeasibilityAwaitsApprovalAndBlocksSuccessorUntilAccepted() {
+    KnowledgeObject asset =
+        dataAsset(
+            UUID.randomUUID(),
+            "unknown",
+            List.of("BOOKING_COMPLETED"),
+            Map.of("history", false, "grain", "one immutable customer event per row"));
+    ModelRequirement requirement =
+        requirement(List.of("BOOKING_COMPLETED"), Map.of(), "14d", "batch", "sessions");
+    InitiativeRepository.Attempt feasibility =
+        attempt(attemptId, InitiativeStage.DATA_FEASIBILITY, StageStatus.PENDING, 1);
+    InitiativeRepository.Attempt reuse =
+        attempt(UUID.randomUUID(), InitiativeStage.REUSE_DECISION, StageStatus.COMPLETED, 1);
+    InitiativeRepository.Attempt targeting =
+        attempt(UUID.randomUUID(), InitiativeStage.TARGETING_DESIGN, StageStatus.PENDING, 1);
+    prepareFeasibility(requirement, feasibility, reuse, List.of(asset));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.TARGETING_DESIGN))
+        .thenReturn(Optional.of(targeting));
+    when(knowledge.get(asset.id(), false)).thenReturn(packageFor(asset));
+
+    service.runStage(initiativeId, InitiativeStage.DATA_FEASIBILITY);
+
+    org.mockito.ArgumentCaptor<List<FeasibilityCheck>> checks =
+        org.mockito.ArgumentCaptor.forClass(List.class);
+    verify(repository)
+        .awaitApproval(eq(attemptId), any(), anyLong(), eq(List.of()), checks.capture(), any());
+    assertThat(checks.getValue())
+        .filteredOn(check -> check.name().startsWith("data-"))
+        .allSatisfy(check -> assertThat(check.status()).isEqualTo("UNKNOWN"));
+    verify(repository, never()).insertGateDecision(any(), any(), any(), any(), any(), any(), any());
+
+    assertThatThrownBy(() -> service.runStage(initiativeId, InitiativeStage.TARGETING_DESIGN))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("cannot start before");
+  }
+
+  @Test
+  void approvingUnknownFeasibilityRecordsAcceptedChecksAndCompletes() {
+    List<FeasibilityCheck> unknown =
+        List.of(
+            new FeasibilityCheck("data-history:events", "UNKNOWN", UUID.randomUUID(), "not known"));
+    InitiativeRepository.Attempt awaiting =
+        new InitiativeRepository.Attempt(
+            attemptId,
+            InitiativeStage.DATA_FEASIBILITY,
+            1,
+            StageStatus.AWAITING_APPROVAL,
+            Instant.now().minusSeconds(2),
+            Instant.now().minusSeconds(1),
+            7,
+            0,
+            List.of(),
+            unknown,
+            List.of());
+    java.util.concurrent.atomic.AtomicReference<InitiativeRepository.Attempt> current =
+        new java.util.concurrent.atomic.AtomicReference<>(awaiting);
+    when(repository.find(initiativeId)).thenReturn(Optional.of(base()));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.DATA_FEASIBILITY))
+        .thenAnswer(ignored -> Optional.of(current.get()));
+    when(repository.attempts(initiativeId)).thenReturn(allAttempts(awaiting));
+    when(repository.decisions(initiativeId)).thenReturn(List.of());
+    when(repository.events(initiativeId)).thenReturn(List.of());
+
+    service.decide(
+        initiativeId,
+        InitiativeStage.DATA_FEASIBILITY,
+        new GateDecisionRequest(
+            "APPROVE",
+            "reviewer",
+            "Accepted residual uncertainty",
+            List.of("data-history:events")));
+
+    verify(repository)
+        .insertGateDecision(
+            initiativeId,
+            attemptId,
+            InitiativeStage.DATA_FEASIBILITY,
+            "APPROVE",
+            "reviewer",
+            "Accepted residual uncertainty",
+            List.of("data-history:events"));
+    verify(repository)
+        .finish(
+            eq(attemptId),
+            eq(StageStatus.COMPLETED),
+            any(),
+            eq(7L),
+            anyLong(),
+            eq(List.of()),
+            eq(unknown),
+            eq(List.of()));
+
+    current.set(
+        new InitiativeRepository.Attempt(
+            attemptId,
+            InitiativeStage.DATA_FEASIBILITY,
+            1,
+            StageStatus.REJECTED,
+            awaiting.startedAt(),
+            Instant.now(),
+            7,
+            2,
+            List.of(),
+            unknown,
+            List.of()));
+    InitiativeRepository.Attempt targeting =
+        attempt(UUID.randomUUID(), InitiativeStage.TARGETING_DESIGN, StageStatus.PENDING, 1);
+    when(repository.latestAttempt(initiativeId, InitiativeStage.TARGETING_DESIGN))
+        .thenReturn(Optional.of(targeting));
+    assertThatThrownBy(() -> service.runStage(initiativeId, InitiativeStage.TARGETING_DESIGN))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("cannot start before");
+  }
+
+  @Test
+  void rejectingUnknownFeasibilityLeavesAttemptRejected() {
+    List<FeasibilityCheck> unknown =
+        List.of(
+            new FeasibilityCheck("data-history:events", "UNKNOWN", UUID.randomUUID(), "not known"));
+    InitiativeRepository.Attempt awaiting =
+        new InitiativeRepository.Attempt(
+            attemptId,
+            InitiativeStage.DATA_FEASIBILITY,
+            1,
+            StageStatus.AWAITING_APPROVAL,
+            Instant.now().minusSeconds(2),
+            Instant.now().minusSeconds(1),
+            7,
+            0,
+            List.of(),
+            unknown,
+            List.of());
+    when(repository.find(initiativeId)).thenReturn(Optional.of(base()));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.DATA_FEASIBILITY))
+        .thenReturn(Optional.of(awaiting));
+    when(repository.attempts(initiativeId)).thenReturn(allAttempts(awaiting));
+    when(repository.decisions(initiativeId)).thenReturn(List.of());
+    when(repository.events(initiativeId)).thenReturn(List.of());
+
+    service.decide(
+        initiativeId,
+        InitiativeStage.DATA_FEASIBILITY,
+        new GateDecisionRequest("REJECT", "reviewer", "Cannot accept uncertainty"));
+
+    verify(repository)
+        .finish(
+            eq(attemptId),
+            eq(StageStatus.REJECTED),
+            any(),
+            eq(7L),
+            anyLong(),
+            eq(List.of()),
+            eq(unknown),
+            eq(List.of()));
   }
 
   @Test

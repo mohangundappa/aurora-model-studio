@@ -153,6 +153,16 @@ public class InitiativeRepository {
       long machineMillis,
       List<String> blockers,
       List<ArtifactReference> artifacts) {
+    awaitApproval(attemptId, completedAt, machineMillis, blockers, List.of(), artifacts);
+  }
+
+  public void awaitApproval(
+      UUID attemptId,
+      Instant completedAt,
+      long machineMillis,
+      List<String> blockers,
+      List<FeasibilityCheck> checks,
+      List<ArtifactReference> artifacts) {
     finish(
         attemptId,
         StageStatus.AWAITING_APPROVAL,
@@ -160,7 +170,7 @@ public class InitiativeRepository {
         machineMillis,
         0,
         blockers,
-        List.of(),
+        checks,
         artifacts);
   }
 
@@ -190,11 +200,12 @@ public class InitiativeRepository {
       InitiativeStage stage,
       String decision,
       String actor,
-      String reason) {
+      String reason,
+      List<String> acceptedUnknownChecks) {
     jdbc.queryForObject(
         "select set_config('aurora.initiative_gate_actor','human',true)", String.class);
     return jdbc.queryForObject(
-        "insert into initiative_gate_decisions(client_id,initiative_id,stage_attempt_id,stage,decision,actor,actor_verified,reason) values(?,?,?,?,?,?,false,?) returning id",
+        "insert into initiative_gate_decisions(client_id,initiative_id,stage_attempt_id,stage,decision,actor,actor_verified,reason,accepted_unknown_checks) values(?,?,?,?,?,?,false,?,?::jsonb) returning id",
         UUID.class,
         ClientContext.require(),
         initiativeId,
@@ -202,7 +213,8 @@ public class InitiativeRepository {
         stage.name(),
         decision,
         actor,
-        reason);
+        reason,
+        json(acceptedUnknownChecks));
   }
 
   public List<GateRow> decisions(UUID initiativeId) {
@@ -217,6 +229,7 @@ public class InitiativeRepository {
                 rs.getString("actor"),
                 rs.getBoolean("actor_verified"),
                 rs.getString("reason"),
+                readStrings(rs.getString("accepted_unknown_checks")),
                 instant(rs, "created_at")),
         ClientContext.require(),
         initiativeId);
@@ -339,6 +352,7 @@ public class InitiativeRepository {
       String actor,
       boolean actorVerified,
       String reason,
+      List<String> acceptedUnknownChecks,
       Instant createdAt) {}
 
   public record EventRow(

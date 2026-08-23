@@ -30,6 +30,7 @@ public class InitiativeService {
   private static final Set<InitiativeStage> GATED_STAGES =
       EnumSet.of(
           InitiativeStage.REUSE_DECISION,
+          InitiativeStage.DATA_FEASIBILITY,
           InitiativeStage.TARGETING_DESIGN,
           InitiativeStage.FEATURE_DESIGN,
           InitiativeStage.EXPERIMENT_DESIGN,
@@ -261,10 +262,41 @@ public class InitiativeService {
     if (current.status() != StageStatus.AWAITING_APPROVAL) {
       throw new IllegalStateException("Stage is not awaiting human approval");
     }
+    List<String> unknownChecks =
+        current.feasibilityChecks().stream()
+            .filter(check -> check.status().equals("UNKNOWN"))
+            .map(FeasibilityCheck::name)
+            .distinct()
+            .toList();
+    List<String> acceptedUnknownChecks =
+        request.acceptedUnknownChecks() == null
+            ? List.of()
+            : request.acceptedUnknownChecks().stream().distinct().sorted().toList();
+    if (stage == InitiativeStage.DATA_FEASIBILITY && !unknownChecks.isEmpty()) {
+      List<String> expectedUnknownChecks = unknownChecks.stream().sorted().toList();
+      if (decision.equals("APPROVE") && !acceptedUnknownChecks.equals(expectedUnknownChecks)) {
+        throw new IllegalArgumentException(
+            "acceptedUnknownChecks must name every UNKNOWN feasibility check: "
+                + String.join(", ", expectedUnknownChecks));
+      }
+      if (!decision.equals("APPROVE") && !acceptedUnknownChecks.isEmpty()) {
+        throw new IllegalArgumentException(
+            "acceptedUnknownChecks is only valid when approving UNKNOWN feasibility checks");
+      }
+    } else if (!acceptedUnknownChecks.isEmpty()) {
+      throw new IllegalArgumentException(
+          "acceptedUnknownChecks is only valid for UNKNOWN data feasibility checks");
+    }
     Instant now = Instant.now();
     long wait = current.completedAt() == null ? 0 : elapsed(current.completedAt(), now);
     repository.insertGateDecision(
-        initiativeId, current.id(), stage, decision, request.actor(), request.reason());
+        initiativeId,
+        current.id(),
+        stage,
+        decision,
+        request.actor(),
+        request.reason(),
+        acceptedUnknownChecks);
     StageStatus next =
         switch (decision) {
           case "APPROVE" -> StageStatus.COMPLETED;
@@ -419,7 +451,11 @@ public class InitiativeService {
       resolvedAssets.forEach(
           dataAsset -> addDataAssetChecks(requirement, dataAsset, checks, blockers));
     }
-    StageStatus status = blockers.isEmpty() ? StageStatus.COMPLETED : StageStatus.BLOCKED;
+    boolean hasUnknown = checks.stream().anyMatch(check -> check.status().equals("UNKNOWN"));
+    StageStatus status =
+        !blockers.isEmpty()
+            ? StageStatus.BLOCKED
+            : hasUnknown ? StageStatus.AWAITING_APPROVAL : StageStatus.COMPLETED;
     Instant finished = Instant.now();
     Map<UUID, Boolean> syntheticById =
         visible.stream()
@@ -436,17 +472,31 @@ public class InitiativeService {
                         syntheticById.getOrDefault(check.artifactId(), false)))
             .distinct()
             .toList();
-    repository.finish(
-        attempt.id(), status, finished, elapsed(started, finished), 0, blockers, checks, artifacts);
+    if (status == StageStatus.AWAITING_APPROVAL) {
+      repository.awaitApproval(
+          attempt.id(), finished, elapsed(started, finished), blockers, checks, artifacts);
+    } else {
+      repository.finish(
+          attempt.id(),
+          status,
+          finished,
+          elapsed(started, finished),
+          0,
+          blockers,
+          checks,
+          artifacts);
+    }
     repository.insertEvent(
         base.id(),
         attempt.stage(),
         StageStatus.IN_PROGRESS,
         status,
         AGENT,
-        blockers.isEmpty()
-            ? "Deterministic feasibility checks completed"
-            : "Data feasibility blocked",
+        status == StageStatus.AWAITING_APPROVAL
+            ? "UNKNOWN feasibility checks require explicit human acceptance"
+            : blockers.isEmpty()
+                ? "Deterministic feasibility checks completed"
+                : "Data feasibility blocked",
         artifacts);
     return get(base.id());
   }
@@ -756,6 +806,7 @@ public class InitiativeService {
         row.actor(),
         row.actorVerified(),
         row.reason(),
+        row.acceptedUnknownChecks(),
         row.createdAt());
   }
 
