@@ -40,7 +40,7 @@ class KnowledgePostgresIntegrationTest {
 
   @Container
   static final PostgreSQLContainer<?> POSTGRES =
-      new PostgreSQLContainer<>("postgres:16-alpine")
+      new PostgreSQLContainer<>("pgvector/pgvector:pg16")
           .withDatabaseName("aurora_studio")
           .withUsername("aurora")
           .withPassword("aurora");
