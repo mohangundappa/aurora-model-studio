@@ -1279,7 +1279,7 @@ class InitiativeServiceTest {
     ModelRequirement requirement =
         requirement(
             List.of("BOOKING_COMPLETED"),
-            Map.of("requiredFeatures", List.of("generated-feature")),
+            Map.of("requiredFeatures", List.of("generated-feature", "booking-intent")),
             "30d",
             "batch",
             "sessions");
@@ -1322,11 +1322,13 @@ class InitiativeServiceTest {
     when(repository.latestAttempt(initiativeId, InitiativeStage.DATA_FEASIBILITY))
         .thenReturn(Optional.of(feasibility));
     when(discovery.getRequirement(any())).thenReturn(requirement);
+    KnowledgeObject approved = feature(UUID.randomUUID(), "booking-intent");
     when(knowledge.search("FEATURE", null, null, null, null, null, true))
-        .thenReturn(List.of(candidate));
+        .thenReturn(List.of(candidate, approved));
     when(knowledge.search(null, null, null, null, null, null, true))
-        .thenReturn(List.of(outcome, candidate));
+        .thenReturn(List.of(outcome, candidate, approved));
     when(knowledge.get(candidate.id(), true)).thenReturn(packageFor(candidate));
+    when(knowledge.get(approved.id(), true)).thenReturn(packageFor(approved));
     when(knowledge.get(outcome.id(), true)).thenReturn(packageFor(outcome));
     when(repository.attempts(initiativeId))
         .thenReturn(allAttempts(handoff, experiment), allAttempts(handoff, experiment));
@@ -1343,7 +1345,9 @@ class InitiativeServiceTest {
             anyLong(),
             eq(0L),
             org.mockito.ArgumentMatchers.argThat(
-                blockers -> blockers.contains("FEATURE_NOT_APPROVED:feature:generated-feature")),
+                blockers ->
+                    blockers.contains("FEATURE_NOT_APPROVED:feature:generated-feature")
+                        && !blockers.contains("FEATURE_NOT_APPROVED:feature:booking-intent")),
             eq(List.of()),
             eq(List.of()));
   }
@@ -1390,6 +1394,7 @@ class InitiativeServiceTest {
     ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
     verify(client).register(eq("booking-intent"), payload.capture(), eq(approved.hash()));
     assertThat(payload.getValue()).containsEntry("packageHash", approved.hash());
+    assertThat(payload.getValue()).doesNotContainKey("requirementId");
     assertThat(payload.getValue().get("targeting")).isEqualTo(approved.content().get("targeting"));
     verify(repository, never()).savePackage(any(), any(), any());
   }
