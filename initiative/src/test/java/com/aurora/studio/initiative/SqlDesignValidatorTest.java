@@ -37,7 +37,9 @@ class SqlDesignValidatorTest {
             "SELECT event_id, event_time FROM raw_events "
                 + "WHERE event_name = 'BOOKING_COMPLETED' AND event_time <= :as_of",
             REQUIREMENT,
-            List.of(rawEvents()));
+            List.of(rawEvents()),
+            List.of(),
+            List.of());
     assertThat(leakage)
         .anySatisfy(
             verdict ->
@@ -47,7 +49,9 @@ class SqlDesignValidatorTest {
         SqlDesignValidator.validateCohort(
             "SELECT event_id, event_time FROM raw_events WHERE event_time > :as_of",
             REQUIREMENT,
-            List.of(rawEvents()));
+            List.of(rawEvents()),
+            List.of(),
+            List.of());
     assertThat(forward)
         .anySatisfy(verdict -> assertThat(verdict.reason()).contains("forward-looking predicate"));
   }
@@ -60,7 +64,9 @@ class SqlDesignValidatorTest {
                 + "WHERE event_time <= :as_of "
                 + "AND event_time > :as_of - interval '30 days'",
             REQUIREMENT,
-            List.of(rawEvents()));
+            List.of(rawEvents()),
+            List.of(),
+            List.of());
     assertThat(results)
         .filteredOn(verdict -> verdict.name().equals("point-in-time-safety"))
         .extracting(ValidatorVerdict::status)
@@ -73,7 +79,9 @@ class SqlDesignValidatorTest {
         SqlDesignValidator.validateCohort(
             "SELECT event_id, made_up FROM raw_events WHERE event_time <= :as_of",
             REQUIREMENT,
-            List.of(rawEvents()));
+            List.of(rawEvents()),
+            List.of(),
+            List.of());
     assertThat(unknownColumn)
         .anySatisfy(verdict -> assertThat(verdict.reason()).contains("unknown governed column"));
 
@@ -81,14 +89,18 @@ class SqlDesignValidatorTest {
         SqlDesignValidator.validateCohort(
             "SELECT * FROM raw_events WHERE event_time <= :as_of",
             REQUIREMENT,
-            List.of(rawEvents()));
+            List.of(rawEvents()),
+            List.of(),
+            List.of());
     assertThat(star).anySatisfy(verdict -> assertThat(verdict.reason()).contains("SELECT *"));
 
     List<ValidatorVerdict> multiple =
         SqlDesignValidator.validateCohort(
             "SELECT event_id, event_time FROM raw_events; SELECT event_id, event_time FROM raw_events",
             REQUIREMENT,
-            List.of(rawEvents()));
+            List.of(rawEvents()),
+            List.of(),
+            List.of());
     assertThat(multiple)
         .anySatisfy(verdict -> assertThat(verdict.reason()).contains("multiple SQL statements"));
   }
@@ -99,7 +111,9 @@ class SqlDesignValidatorTest {
         SqlDesignValidator.validateCohort(
             "SELECT event_id, event_time FROM raw_events WHERE event_time <= :as_of",
             REQUIREMENT,
-            List.of(assetWithoutColumns()));
+            List.of(assetWithoutColumns()),
+            List.of(),
+            List.of());
     assertThat(results)
         .filteredOn(verdict -> verdict.name().equals("governed-references"))
         .extracting(ValidatorVerdict::status)
@@ -113,7 +127,9 @@ class SqlDesignValidatorTest {
         SqlDesignValidator.validateCohort(
             "SELECT subject_key, occurred_at FROM custom_events " + "WHERE occurred_at <= :as_of",
             REQUIREMENT,
-            List.of(asset));
+            List.of(asset),
+            List.of(),
+            List.of());
     assertThat(results)
         .filteredOn(verdict -> verdict.name().equals("output-contract"))
         .extracting(ValidatorVerdict::status)
@@ -126,7 +142,9 @@ class SqlDesignValidatorTest {
         SqlDesignValidator.validateCohort(
             "SELECT event_id, event_time FROM raw_events WHERE event_time <= :as_of",
             REQUIREMENT,
-            List.of(assetWithoutColumns()));
+            List.of(assetWithoutColumns()),
+            List.of(),
+            List.of());
     assertThat(results)
         .filteredOn(verdict -> verdict.name().equals("output-contract"))
         .extracting(ValidatorVerdict::status)
@@ -186,7 +204,9 @@ class SqlDesignValidatorTest {
                 + "WHERE (occurred_at <= :as_of AND subject_key IS NOT NULL) "
                 + "OR (subject_key = 'x' AND occurred_at > :as_of)",
             REQUIREMENT,
-            List.of(asset));
+            List.of(asset),
+            List.of(),
+            List.of());
     assertThat(results)
         .filteredOn(verdict -> verdict.name().equals("point-in-time-safety"))
         .extracting(ValidatorVerdict::status)

@@ -605,7 +605,7 @@ public class InitiativeService {
                 RedactionPolicy.extractionDefault(),
                 "Draft a cohort and optional label query using only governed metadata."));
     if (!result.successful())
-      throw new IllegalStateException("targeting generation failed: " + result.message());
+      return finishProviderFailure(base, attempt, started, result, "Targeting design");
     LineageContext lineage = lineageContext(base.includeCandidates(), assets);
     List<GenerationDraft> drafts = new ArrayList<>();
     for (Object value : list(result.payload().get("drafts"))) {
@@ -672,7 +672,7 @@ public class InitiativeService {
                 RedactionPolicy.extractionDefault(),
                 "Draft governed feature hypotheses; never claim approval."));
     if (!result.successful())
-      throw new IllegalStateException("feature generation failed: " + result.message());
+      return finishProviderFailure(base, attempt, started, result, "Feature design");
     List<GenerationDraft> drafts = new ArrayList<>();
     for (Object value : list(result.payload().get("drafts"))) {
       if (!(value instanceof Map<?, ?> raw)) continue;
@@ -704,7 +704,8 @@ public class InitiativeService {
             .filter(draft -> "ACCEPTED".equals(draft.outcome()) || "REUSE".equals(draft.outcome()))
             .toList();
     List<ValidatorVerdict> verdicts =
-        accepted.stream().flatMap(draft -> draft.validatorVerdicts().stream()).toList();
+        (accepted.isEmpty() ? drafts : accepted)
+            .stream().flatMap(draft -> draft.validatorVerdicts().stream()).toList();
     List<String> violated =
         drafts.stream()
             .flatMap(draft -> draft.validatorVerdicts().stream())
@@ -746,6 +747,40 @@ public class InitiativeService {
             ? label + " has unverifiable checks requiring human acceptance"
             : blockers.isEmpty() ? label + " validators completed" : label + " was blocked",
         List.of(new ArtifactReference("LLM_INVOCATION", invocationId, false)));
+    return get(base.id());
+  }
+
+  private Initiative finishProviderFailure(
+      InitiativeRepository.Base base,
+      InitiativeRepository.Attempt attempt,
+      Instant started,
+      LlmResult result,
+      String label) {
+    String reason = label + " provider failed";
+    List<String> failures = List.of("provider-failure:" + reason);
+    List<ArtifactReference> artifacts =
+        result.invocationId() == null
+            ? List.of()
+            : List.of(new ArtifactReference("LLM_INVOCATION", result.invocationId(), false));
+    Instant finished = Instant.now();
+    repository.saveDrafts(attempt.id(), List.of(), failures);
+    repository.finish(
+        attempt.id(),
+        StageStatus.PROVIDER_FAILED,
+        finished,
+        elapsed(started, finished),
+        0,
+        List.of(),
+        List.of(),
+        artifacts);
+    repository.insertEvent(
+        base.id(),
+        attempt.stage(),
+        StageStatus.IN_PROGRESS,
+        StageStatus.PROVIDER_FAILED,
+        AGENT,
+        reason,
+        artifacts);
     return get(base.id());
   }
 

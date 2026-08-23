@@ -48,11 +48,6 @@ final class SqlDesignValidator {
   private SqlDesignValidator() {}
 
   static List<ValidatorVerdict> validateCohort(
-      String sql, ModelRequirement requirement, List<KnowledgeObject> assets) {
-    return validateCohort(sql, requirement, assets, List.of(), List.of());
-  }
-
-  static List<ValidatorVerdict> validateCohort(
       String sql,
       ModelRequirement requirement,
       List<KnowledgeObject> assets,
