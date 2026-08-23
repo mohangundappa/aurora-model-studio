@@ -9,6 +9,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -289,7 +290,86 @@ public class InitiativeRepository {
         readDrafts(rs.getString("generation_drafts")),
         rs.getInt("drafts_generated"),
         rs.getInt("drafts_rejected"),
-        readStrings(rs.getString("violated_checks")));
+        readStrings(rs.getString("violated_checks")),
+        handoffAttempts(rs.getObject("id", UUID.class)));
+  }
+
+  public List<HandoffAttempt> handoffAttempts(UUID stageAttemptId) {
+    return jdbc.query(
+        "select * from initiative_handoff_attempts where client_id=? and stage_attempt_id=? order by created_at",
+        (rs, row) ->
+            new HandoffAttempt(
+                rs.getObject("id", UUID.class),
+                rs.getString("package_hash"),
+                rs.getString("endpoint"),
+                readMap(rs.getString("request_summary")),
+                (Integer) rs.getObject("response_status"),
+                rs.getString("candidate_id"),
+                rs.getString("candidate_status"),
+                rs.getString("outcome"),
+                rs.getString("failure_code"),
+                rs.getString("failure_message"),
+                instant(rs, "started_at"),
+                instant(rs, "completed_at")),
+        ClientContext.require(),
+        stageAttemptId);
+  }
+
+  public UUID savePackage(
+      UUID initiativeId, String packageHash, Map<String, Object> packageContent) {
+    return jdbc.queryForObject(
+        "insert into initiative_handoff_packages(client_id,initiative_id,package_hash,package) values(?,?,?,?::jsonb) on conflict (client_id,package_hash) do update set package_hash=excluded.package_hash returning id",
+        UUID.class,
+        ClientContext.require(),
+        initiativeId,
+        packageHash,
+        json(packageContent));
+  }
+
+  public Optional<HandoffPackage> findPackage(UUID packageId) {
+    return jdbc
+        .query(
+            "select package_hash,package::text from initiative_handoff_packages where client_id=? and id=?",
+            (rs, row) ->
+                HandoffPackage.stored(
+                    rs.getString("package_hash"), readMap(rs.getString("package"))),
+            ClientContext.require(),
+            packageId)
+        .stream()
+        .findFirst();
+  }
+
+  public UUID saveHandoffAttempt(
+      UUID initiativeId,
+      UUID stageAttemptId,
+      String packageHash,
+      String endpoint,
+      Map<String, Object> requestSummary,
+      Integer responseStatus,
+      String candidateId,
+      String candidateStatus,
+      String outcome,
+      String failureCode,
+      String failureMessage,
+      Instant startedAt,
+      Instant completedAt) {
+    return jdbc.queryForObject(
+        "insert into initiative_handoff_attempts(client_id,initiative_id,stage_attempt_id,package_hash,endpoint,request_summary,response_status,candidate_id,candidate_status,outcome,failure_code,failure_message,started_at,completed_at) values(?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?) returning id",
+        UUID.class,
+        ClientContext.require(),
+        initiativeId,
+        stageAttemptId,
+        packageHash,
+        endpoint,
+        json(requestSummary),
+        responseStatus,
+        candidateId,
+        candidateStatus,
+        outcome,
+        failureCode,
+        failureMessage,
+        Timestamp.from(startedAt),
+        Timestamp.from(completedAt));
   }
 
   private Instant instant(ResultSet rs, String column) throws SQLException {
@@ -298,7 +378,7 @@ public class InitiativeRepository {
   }
 
   private boolean notImplemented(InitiativeStage stage) {
-    return stage == InitiativeStage.EXPERIMENT_DESIGN || stage == InitiativeStage.HANDOFF;
+    return false;
   }
 
   private StageStatus nullableStageStatus(String value) {
@@ -318,6 +398,14 @@ public class InitiativeRepository {
       return mapper.readValue(value, new TypeReference<>() {});
     } catch (JsonProcessingException exception) {
       throw new IllegalStateException("invalid initiative blockers", exception);
+    }
+  }
+
+  private Map<String, Object> readMap(String value) {
+    try {
+      return mapper.readValue(value, new TypeReference<>() {});
+    } catch (JsonProcessingException exception) {
+      throw new IllegalStateException("invalid initiative JSON", exception);
     }
   }
 
@@ -367,7 +455,8 @@ public class InitiativeRepository {
       List<GenerationDraft> drafts,
       int draftsGenerated,
       int draftsRejected,
-      List<String> violatedChecks) {
+      List<String> violatedChecks,
+      List<HandoffAttempt> handoffAttempts) {
     public Attempt(
         UUID id,
         InitiativeStage stage,
@@ -395,6 +484,42 @@ public class InitiativeRepository {
           List.of(),
           0,
           0,
+          List.of(),
+          List.of());
+    }
+
+    public Attempt(
+        UUID id,
+        InitiativeStage stage,
+        int attempt,
+        StageStatus status,
+        Instant startedAt,
+        Instant completedAt,
+        long machineDurationMillis,
+        long humanWaitDurationMillis,
+        List<String> blockers,
+        List<FeasibilityCheck> feasibilityChecks,
+        List<ArtifactReference> artifacts,
+        List<GenerationDraft> drafts,
+        int draftsGenerated,
+        int draftsRejected,
+        List<String> violatedChecks) {
+      this(
+          id,
+          stage,
+          attempt,
+          status,
+          startedAt,
+          completedAt,
+          machineDurationMillis,
+          humanWaitDurationMillis,
+          blockers,
+          feasibilityChecks,
+          artifacts,
+          drafts,
+          draftsGenerated,
+          draftsRejected,
+          violatedChecks,
           List.of());
     }
   }

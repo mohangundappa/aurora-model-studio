@@ -1,19 +1,23 @@
-# Future candidate-model handoff
+# Candidate handoff
 
-Phase 5 may add an HTTP `POST` from Aurora Model Studio to Aurora Intelligence that
-registers a candidate model as `TESTED` in Aurora Intelligence's model registry. The
-payload is expected to include:
+The Model Studio handoff transfers an approved design package to Aurora. It
+does not register a trained model as `TESTED`: Model Studio never trains
+anything and therefore supplies no weights or evaluation.
 
-- model name and model version
-- feature names
-- weights and bias
-- initiative ID
-- approved knowledge versions used
-- experiment evidence
-- self-declared approver
+The receiving contract is:
 
-Aurora Intelligence currently has no receiving endpoint for this contract. No handoff
-code or client is implemented in phase 1, and the Aurora Intelligence repository is not
-changed by this project. Production deployment remains a human decision in Aurora's
-lifecycle. The receiving runtime, deployment controls, monitoring, and rollback remain
-client MLOps responsibilities.
+```text
+POST /api/models/{name}/candidates
+  { studioInitiativeId, packageHash, targeting, features,
+    experimentDesign, feasibility, evidence, notIncluded }
+→ 201 { candidateId, status: "AWAITING_WEIGHTS" }
+```
+
+The package is immutable, deterministically serialized, SHA-256 hashed, and
+uses that hash as the idempotency key. Aurora candidates are not model
+versions and are not servable. A client must provide trained weights and a
+human-controlled evaluation before a model version can earn `TESTED`.
+
+Model Studio records every outbound attempt and contains transport or remote
+failures without creating a local registration. The Aurora receiving endpoint
+belongs to a separate repository and review.
