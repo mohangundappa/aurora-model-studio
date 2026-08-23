@@ -1,0 +1,8 @@
+name: room-interest
+explanationTemplate: Interest in room offers
+lookback: 14d
+freshness: 1d
+expiry: 3d
+consentRequired: true
+inputs:
+  - page_view

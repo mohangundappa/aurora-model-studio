@@ -1,0 +1,8 @@
+name: booking-intent
+explanationTemplate: Recent booking intent
+lookback: 30d
+freshness: 1d
+expiry: 7d
+consentRequired: true
+inputs:
+  - event

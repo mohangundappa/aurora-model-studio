@@ -1,0 +1,2 @@
+@Component
+public class BookingIntentCalculator {}
