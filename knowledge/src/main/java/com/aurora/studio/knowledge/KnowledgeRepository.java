@@ -350,6 +350,14 @@ public class KnowledgeRepository {
         name);
   }
 
+  public List<KnowledgeObject> findByGovernedSubject(String subject) {
+    return jdbc.query(
+        "select * from knowledge_objects where client_id=? and attributes->>'governedSubject'=? order by knowledge_key,version desc",
+        this::map,
+        ClientContext.require(),
+        subject);
+  }
+
   public void addRelationshipIfAbsent(UUID from, String type, UUID to, UUID evidenceId) {
     jdbc.update(
         "insert into knowledge_relationships(client_id,from_object_id,relationship_type,to_object_id,evidence_id) values(?,?,?,?,?) on conflict (client_id,from_object_id,relationship_type,to_object_id) do nothing",

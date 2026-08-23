@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -119,15 +120,11 @@ public class KnowledgeService {
     return saved;
   }
 
+  @Transactional
   public KnowledgeObject createExtracted(Draft draft, String actor, UUID invocationId) {
-    KnowledgeObject object = createExtractedObject(draft, actor);
+    KnowledgeObject object = create(draft, actor, false);
     repository.linkInvocation(object.id(), invocationId);
     return repository.findById(object.id()).orElseThrow();
-  }
-
-  @Transactional
-  private KnowledgeObject createExtractedObject(Draft draft, String actor) {
-    return create(draft, actor, false);
   }
 
   @Transactional
@@ -146,6 +143,12 @@ public class KnowledgeService {
     }
     if (repository.evidence(id).isEmpty()) {
       throw new IllegalStateException("Knowledge object cannot be approved without evidence");
+    }
+    List<String> missing = missingRequiredFields(object.knowledgeType(), object.attributes());
+    if (!missing.isEmpty()) {
+      throw new IllegalStateException(
+          "Knowledge object cannot be approved; missing required fields: "
+              + String.join(", ", missing));
     }
     repository
         .findApproved(object.knowledgeKey())
@@ -305,6 +308,51 @@ public class KnowledgeService {
     }
   }
 
+  @Transactional
+  public void linkGovernedArtifacts(
+      UUID objectId, String governedSubject, String governedRole, UUID evidenceId) {
+    if (governedSubject == null
+        || governedSubject.isBlank()
+        || governedRole == null
+        || governedRole.isBlank()) {
+      return;
+    }
+    KnowledgeObject object = require(objectId);
+    for (KnowledgeObject related : repository.findByGovernedSubject(governedSubject)) {
+      if (related.id().equals(objectId)) continue;
+      String relatedRole = String.valueOf(related.attributes().get("governedRole"));
+      if ("IMPLEMENTATION".equals(governedRole) && "SPECIFICATION".equals(relatedRole)) {
+        repository.addRelationshipIfAbsent(objectId, "GOVERNED_BY", related.id(), evidenceId);
+      } else if ("SPECIFICATION".equals(governedRole) && "IMPLEMENTATION".equals(relatedRole)) {
+        repository.addRelationshipIfAbsent(related.id(), "GOVERNED_BY", objectId, evidenceId);
+      }
+    }
+    if (evidenceId != null) {
+      detectConflicts(object, evidenceId);
+    } else {
+      repository.evidence(objectId).stream()
+          .max(java.util.Comparator.comparing(KnowledgeEvidence::recordedAt))
+          .ifPresent(evidence -> detectConflicts(object, evidence.id()));
+    }
+  }
+
+  @Transactional
+  public void linkRegisteredFeatureImplementations(UUID implementationId) {
+    Map<String, KnowledgeObject> latestByKey = new LinkedHashMap<>();
+    for (KnowledgeObject feature : repository.search("FEATURE", null, null, null, null, null)) {
+      latestByKey.merge(feature.knowledgeKey(), feature, this::preferredFeature);
+    }
+    for (KnowledgeObject feature : latestByKey.values()) {
+      repository.addRelationshipIfAbsent(feature.id(), "IMPLEMENTED_BY", implementationId, null);
+    }
+  }
+
+  private KnowledgeObject preferredFeature(KnowledgeObject current, KnowledgeObject candidate) {
+    if (current.lifecycleStatus().equals("APPROVED")) return current;
+    if (candidate.lifecycleStatus().equals("APPROVED")) return candidate;
+    return current.version() >= candidate.version() ? current : candidate;
+  }
+
   public List<KnowledgePackage> governanceRules(String enforcementPoint) {
     return repository.searchGovernanceRules(enforcementPoint).stream()
         .map(object -> get(object.id(), true))
@@ -458,6 +506,16 @@ public class KnowledgeService {
     return fields.stream().filter(field -> attributes.get(field) == null).toList();
   }
 
+  private List<String> missingRequiredFields(KnowledgeType type, Map<String, Object> attributes) {
+    return REQUIRED_FIELDS.get(type).stream()
+        .filter(
+            field -> {
+              Object value = attributes.get(field);
+              return value == null || (value instanceof String text && text.isBlank());
+            })
+        .toList();
+  }
+
   private Double recency(String knowledgeKey, List<KnowledgeEvidence> evidence) {
     if (evidence.isEmpty()) return null;
     Instant latest =
@@ -553,9 +611,25 @@ public class KnowledgeService {
   }
 
   private void detectConflicts(KnowledgeObject object, UUID evidenceId) {
-    List<String> fields = REQUIRED_FIELDS.get(object.knowledgeType());
+    Set<UUID> compared = new HashSet<>();
+    List<KnowledgeObject> others = new ArrayList<>();
     for (KnowledgeObject other :
         repository.findByKeyExcluding(object.knowledgeKey(), object.id())) {
+      if (compared.add(other.id())) others.add(other);
+    }
+    for (KnowledgeRelationship relationship : repository.relationships(object.id())) {
+      if (relationship.relationshipType()
+          != com.aurora.studio.common.RelationshipType.GOVERNED_BY) {
+        continue;
+      }
+      UUID otherId =
+          relationship.fromObjectId().equals(object.id())
+              ? relationship.toObjectId()
+              : relationship.fromObjectId();
+      repository.findById(otherId).filter(other -> compared.add(other.id())).ifPresent(others::add);
+    }
+    for (KnowledgeObject other : others) {
+      List<String> fields = comparableConflictFields(object, other);
       for (String field : fields) {
         Object currentValue = object.attributes().get(field);
         Object otherValue = other.attributes().get(field);
@@ -589,6 +663,22 @@ public class KnowledgeService {
 
   private String conflictClass(String field) {
     return field.equals("businessDefinition") ? "DIVERGENT_DESCRIPTION" : "BLOCKING";
+  }
+
+  private List<String> comparableConflictFields(KnowledgeObject object, KnowledgeObject other) {
+    Set<String> fields = new LinkedHashSet<>();
+    fields.addAll(REQUIRED_FIELDS.get(object.knowledgeType()));
+    fields.addAll(REQUIRED_FIELDS.get(other.knowledgeType()));
+    fields.addAll(
+        List.of(
+            "businessDefinition",
+            "entity",
+            "observationWindow",
+            "targetEvent",
+            "predictionHorizon",
+            "grain",
+            "measurementUnit"));
+    return fields.stream().toList();
   }
 
   public record Draft(

@@ -261,6 +261,98 @@ class InitiativeServiceTest {
   }
 
   @Test
+  void feasibilityTraversesFeatureImplementationToDataAsset() {
+    KnowledgeObject feature = feature(UUID.randomUUID(), "booking-intent");
+    KnowledgeObject implementation =
+        new KnowledgeObject(
+            UUID.randomUUID(),
+            feature.clientId(),
+            "implementation:booking-intent",
+            1,
+            KnowledgeType.IMPLEMENTATION,
+            "BookingIntentCalculator",
+            "domain",
+            "use-case",
+            "implementation",
+            Map.of(),
+            Map.of(),
+            List.of(),
+            "APPROVED",
+            Instant.now(),
+            null,
+            1.0,
+            Map.of(),
+            Map.of(),
+            null,
+            "test",
+            null,
+            "test",
+            null,
+            Map.of(),
+            false);
+    KnowledgeObject asset =
+        dataAsset(
+            UUID.randomUUID(),
+            "raw_events",
+            List.of("BOOKING_COMPLETED"),
+            Map.of("history", "30d", "refreshCadence", "1d", "pointInTimeAvailable", true));
+    ModelRequirement requirement =
+        requirement(
+            List.of(),
+            Map.of("requiredFeatures", List.of("booking-intent")),
+            "14d",
+            "2d",
+            "sessions");
+    InitiativeRepository.Attempt feasibility =
+        attempt(attemptId, InitiativeStage.DATA_FEASIBILITY, StageStatus.PENDING, 1);
+    InitiativeRepository.Attempt reuse =
+        attempt(UUID.randomUUID(), InitiativeStage.REUSE_DECISION, StageStatus.COMPLETED, 1);
+    prepareFeasibility(requirement, feasibility, reuse, List.of(feature, implementation, asset));
+    when(knowledge.get(feature.id(), false))
+        .thenReturn(
+            packageFor(
+                feature,
+                List.of(
+                    new KnowledgeRelationship(
+                        UUID.randomUUID(),
+                        feature.clientId(),
+                        feature.id(),
+                        RelationshipType.IMPLEMENTED_BY,
+                        implementation.id(),
+                        null))));
+    when(knowledge.get(implementation.id(), false))
+        .thenReturn(
+            packageFor(
+                implementation,
+                List.of(
+                    new KnowledgeRelationship(
+                        UUID.randomUUID(),
+                        feature.clientId(),
+                        implementation.id(),
+                        RelationshipType.DERIVED_FROM,
+                        asset.id(),
+                        null))));
+
+    service.runStage(initiativeId, InitiativeStage.DATA_FEASIBILITY);
+
+    org.mockito.ArgumentCaptor<List<FeasibilityCheck>> checks =
+        org.mockito.ArgumentCaptor.forClass(List.class);
+    verify(repository)
+        .finish(
+            eq(attemptId),
+            eq(StageStatus.COMPLETED),
+            any(),
+            anyLong(),
+            eq(0L),
+            eq(List.of()),
+            checks.capture(),
+            any());
+    assertThat(checks.getValue())
+        .filteredOn(check -> check.name().startsWith("data-"))
+        .allSatisfy(check -> assertThat(check.artifactId()).isEqualTo(asset.id()));
+  }
+
+  @Test
   void feasibilityDoesNotTreatDeclarationsAsAdequacy() {
     KnowledgeObject asset =
         dataAsset(
@@ -414,6 +506,35 @@ class InitiativeServiceTest {
 
   private KnowledgeObject dataAsset(UUID id, String name, List<String> observables) {
     return dataAsset(id, name, observables, Map.of("observables", observables));
+  }
+
+  private KnowledgeObject feature(UUID id, String name) {
+    return new KnowledgeObject(
+        id,
+        UUID.randomUUID(),
+        "feature:" + name,
+        1,
+        KnowledgeType.FEATURE,
+        name,
+        "domain",
+        "use-case",
+        "feature",
+        Map.of(),
+        Map.of(),
+        List.of(),
+        "APPROVED",
+        Instant.now(),
+        null,
+        1.0,
+        Map.of(),
+        Map.of(),
+        null,
+        "test",
+        null,
+        "test",
+        null,
+        Map.of("businessDefinition", "feature"),
+        false);
   }
 
   private KnowledgeObject dataAsset(

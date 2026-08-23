@@ -1,5 +1,6 @@
 package com.aurora.studio.initiative;
 
+import com.aurora.studio.common.RelationshipType;
 import com.aurora.studio.discovery.DiscoveryCandidate;
 import com.aurora.studio.discovery.DiscoveryRun;
 import com.aurora.studio.discovery.DiscoveryService;
@@ -453,16 +454,29 @@ public class InitiativeService {
   private Set<KnowledgeObject> resolveDataAssets(
       KnowledgeObject artifact, Map<UUID, KnowledgeObject> visibleById, boolean includeCandidates) {
     Set<KnowledgeObject> assets = new java.util.LinkedHashSet<>();
-    if (artifact.knowledgeType().name().equals("DATA_ASSET")) assets.add(artifact);
-    KnowledgePackage pack = knowledge.get(artifact.id(), includeCandidates);
-    for (KnowledgeRelationship relationship : pack.relationships()) {
-      KnowledgeObject related = visibleById.get(relationship.fromObjectId());
-      if (related != null && related.knowledgeType().name().equals("DATA_ASSET")) {
-        assets.add(related);
+    java.util.ArrayDeque<UUID> pending = new java.util.ArrayDeque<>();
+    Set<UUID> visited = new java.util.HashSet<>();
+    pending.add(artifact.id());
+    while (!pending.isEmpty()) {
+      UUID current = pending.removeFirst();
+      if (!visited.add(current)) continue;
+      KnowledgeObject currentObject = visibleById.get(current);
+      if (currentObject != null && currentObject.knowledgeType().name().equals("DATA_ASSET")) {
+        assets.add(currentObject);
+        continue;
       }
-      related = visibleById.get(relationship.toObjectId());
-      if (related != null && related.knowledgeType().name().equals("DATA_ASSET")) {
-        assets.add(related);
+      KnowledgePackage pack = knowledge.get(current, includeCandidates);
+      for (KnowledgeRelationship relationship : pack.relationships()) {
+        if (!relationship.fromObjectId().equals(current)) continue;
+        UUID relatedId = relationship.toObjectId();
+        KnowledgeObject related = visibleById.get(relatedId);
+        if (related == null) continue;
+        if (relationship.relationshipType() == RelationshipType.DERIVED_FROM
+            && related.knowledgeType().name().equals("DATA_ASSET")) {
+          assets.add(related);
+        } else if (relationship.relationshipType() == RelationshipType.IMPLEMENTED_BY) {
+          pending.addLast(relatedId);
+        }
       }
     }
     return assets;

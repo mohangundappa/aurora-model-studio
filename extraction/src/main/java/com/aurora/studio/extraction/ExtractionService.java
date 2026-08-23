@@ -117,6 +117,11 @@ public class ExtractionService {
           && latest
               .filter(existing -> sameInterpretation(existing, candidate.draft()))
               .isPresent()) {
+        if (Boolean.TRUE.equals(
+            artifact.structuralFact().inputs().get("governsRegisteredFeatures"))) {
+          latest.ifPresent(
+              existing -> knowledge.linkRegisteredFeatureImplementations(existing.id()));
+        }
         unchangedArtifacts++;
         continue;
       }
@@ -129,6 +134,17 @@ public class ExtractionService {
               artifact,
               synthetic ? "synthetic-legacy-estate" : "aurora-estate",
               sourceVersion);
+      Object governedSubject = artifact.structuralFact().inputs().get("governedSubject");
+      Object governedRole = artifact.structuralFact().inputs().get("governedRole");
+      knowledge.linkGovernedArtifacts(
+          object.id(),
+          governedSubject == null ? null : String.valueOf(governedSubject),
+          governedRole == null ? null : String.valueOf(governedRole),
+          null);
+      if (Boolean.TRUE.equals(
+          artifact.structuralFact().inputs().get("governsRegisteredFeatures"))) {
+        knowledge.linkRegisteredFeatureImplementations(object.id());
+      }
       knowledge.linkReferencedDataAssets(
           object.id(), artifact.structuralFact().referencedTables(), evidence.id());
       persistProvenance(object, evidence, candidate.fields());
@@ -237,6 +253,12 @@ public class ExtractionService {
     Map<String, Object> attributes = new LinkedHashMap<>();
     if (!artifact.structuralFact().referencedTables().isEmpty()) {
       attributes.put("referencedTables", artifact.structuralFact().referencedTables());
+    }
+    for (String field :
+        List.of(
+            "governedSubject", "governedRole", "measurementUnit", "governsRegisteredFeatures")) {
+      Object value = artifact.structuralFact().inputs().get(field);
+      if (value != null) attributes.put(field, value);
     }
     if (type == KnowledgeType.IMPLEMENTATION) {
       attributes.put(

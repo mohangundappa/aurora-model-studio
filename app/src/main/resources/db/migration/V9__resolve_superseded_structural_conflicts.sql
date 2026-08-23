@@ -5,7 +5,8 @@ set status = 'RESOLVED',
     values = values || '{"resolutionReason":"Superseded by extraction re-derivation; structural placeholder removed"}'::jsonb
 where status = 'OPEN'
   and (
-    values::text like '%source-defined%'
-    or values::text like '%Structurally parsed%'
-    or values::text like '%guest%'
+    values #>> '{current,value}' = 'source-defined'
+    or values #>> '{other,value}' = 'source-defined'
+    or values #>> '{current,value}' like 'Structurally parsed signal %'
+    or values #>> '{other,value}' like 'Structurally parsed signal %'
   );
