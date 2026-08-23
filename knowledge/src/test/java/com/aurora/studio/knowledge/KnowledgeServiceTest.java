@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.aurora.studio.common.ClientContext;
@@ -578,6 +579,74 @@ class KnowledgeServiceTest {
   }
 
   @Test
+  void generatedFeatureCandidateRequiresOptInEvidenceAndCompleteFields() {
+    UUID id = UUID.randomUUID();
+    UUID invocationId = UUID.randomUUID();
+    Map<String, Object> incompleteAttributes =
+        Map.of(
+            "businessDefinition", "Generated hypothesis", "sourceColumns", List.of("event_time"));
+    KnowledgeObject candidate = feature(id, incompleteAttributes, "EXTRACTED");
+    KnowledgeObject pending = feature(id, incompleteAttributes, "PENDING_REVIEW");
+    java.util.concurrent.atomic.AtomicReference<KnowledgeObject> current =
+        new java.util.concurrent.atomic.AtomicReference<>(candidate);
+    KnowledgeService.Draft draft =
+        new KnowledgeService.Draft(
+            "feature:generated:generated-hypothesis",
+            KnowledgeType.FEATURE,
+            "generated-hypothesis",
+            "customer intelligence",
+            "generated",
+            "generated feature hypothesis",
+            Map.of(),
+            Map.of(),
+            List.of("generated", "candidate"),
+            incompleteAttributes,
+            false);
+    when(repository.findLatest(draft.knowledgeKey())).thenReturn(Optional.empty());
+    when(repository.save(any(KnowledgeObject.class))).thenReturn(candidate);
+    when(repository.findById(id)).thenAnswer(invocation -> Optional.of(current.get()));
+    when(repository.search("FEATURE", null, null, "APPROVED", null, null)).thenReturn(List.of());
+    when(repository.search("FEATURE", null, null, "EXTRACTED", null, null))
+        .thenReturn(List.of(candidate));
+
+    KnowledgeObject created = service.createExtracted(draft, "model-studio-agent", invocationId);
+
+    assertThat(created.lifecycleStatus()).isEqualTo("EXTRACTED");
+    verify(repository).linkInvocation(id, invocationId);
+    assertThat(service.search("FEATURE", null, null, null, null, null, false)).isEmpty();
+    assertThat(service.search("FEATURE", null, null, "EXTRACTED", null, null, true))
+        .containsExactly(candidate);
+    assertThatThrownBy(() -> service.get(id, false)).isInstanceOf(KnowledgeNotFoundException.class);
+
+    service.submitForReview(id, "human-reviewer", "Review generated hypothesis");
+    current.set(pending);
+    when(repository.evidence(id)).thenReturn(List.of());
+    assertThatThrownBy(() -> service.approve(id, "human-reviewer", "Approve"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("without evidence");
+
+    when(repository.evidence(id))
+        .thenReturn(
+            List.of(
+                new KnowledgeEvidence(
+                    UUID.randomUUID(),
+                    ClientContext.require(),
+                    id,
+                    "model-studio",
+                    "generation-record",
+                    "initiative://feature-design",
+                    invocationId.toString(),
+                    "generated draft",
+                    1.0,
+                    Instant.now())));
+    assertThatThrownBy(() -> service.approve(id, "human-reviewer", "Approve"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("entity")
+        .hasMessageContaining("observationWindow")
+        .hasMessageContaining("pointInTimeAvailable");
+  }
+
+  @Test
   void explicitCandidateSearchRequiresOptIn() {
     assertThatThrownBy(() -> service.search(null, null, null, "EXTRACTED", null, null, false))
         .isInstanceOf(IllegalArgumentException.class)
@@ -714,6 +783,10 @@ class KnowledgeServiceTest {
   }
 
   private KnowledgeObject feature(UUID id, Map<String, Object> attributes) {
+    return feature(id, attributes, "EXTRACTED");
+  }
+
+  private KnowledgeObject feature(UUID id, Map<String, Object> attributes, String lifecycleStatus) {
     return new KnowledgeObject(
         id,
         ClientContext.require(),
@@ -727,7 +800,7 @@ class KnowledgeServiceTest {
         Map.of(),
         Map.of(),
         List.of(),
-        "EXTRACTED",
+        lifecycleStatus,
         null,
         null,
         0.7,
