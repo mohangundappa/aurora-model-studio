@@ -7,5 +7,6 @@ public enum StageStatus {
   COMPLETED,
   BLOCKED,
   REJECTED,
-  NOT_IMPLEMENTED
+  NOT_IMPLEMENTED,
+  OUT_OF_SCOPE
 }

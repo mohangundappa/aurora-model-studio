@@ -10,6 +10,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.aurora.studio.common.ClientContext;
 import com.aurora.studio.extraction.ExtractionService;
 import com.aurora.studio.extraction.StructuralParser;
+import com.aurora.studio.initiative.InitiativeRepository;
+import com.aurora.studio.initiative.InitiativeStage;
+import com.aurora.studio.initiative.StageStatus;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
@@ -47,6 +50,7 @@ class KnowledgePostgresIntegrationTest {
 
   @Autowired JdbcTemplate jdbc;
   @Autowired ExtractionService extraction;
+  @Autowired InitiativeRepository initiatives;
   @Autowired MockMvc mockMvc;
 
   @DynamicPropertySource
@@ -242,6 +246,24 @@ class KnowledgePostgresIntegrationTest {
                     initiative))
         .isInstanceOf(DataAccessException.class)
         .hasMessageContaining("append-only");
+  }
+
+  @Test
+  void candidateBuildIsPersistedAsOutOfScope() {
+    UUID requirement =
+        jdbc.queryForObject(
+            "insert into discovery_requirements(client_id,requirement) values(?, '{}'::jsonb) returning id",
+            UUID.class,
+            CLIENT);
+    UUID initiative = initiatives.create(requirement, false, null);
+    String status =
+        jdbc.queryForObject(
+            "select status from initiative_stage_attempts where client_id=? and initiative_id=? and stage=?",
+            String.class,
+            CLIENT,
+            initiative,
+            InitiativeStage.CANDIDATE_BUILD.name());
+    assertThat(status).isEqualTo(StageStatus.OUT_OF_SCOPE.name());
   }
 
   @Test

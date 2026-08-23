@@ -36,11 +36,11 @@ public class InitiativeRepository {
             baseline);
     for (InitiativeStage stage : STAGES) {
       StageStatus status =
-          stage == InitiativeStage.REQUIREMENT_INTAKE || notImplemented(stage)
-              ? stage == InitiativeStage.REQUIREMENT_INTAKE
-                  ? StageStatus.COMPLETED
-                  : StageStatus.NOT_IMPLEMENTED
-              : StageStatus.PENDING;
+          stage == InitiativeStage.REQUIREMENT_INTAKE
+              ? StageStatus.COMPLETED
+              : stage == InitiativeStage.CANDIDATE_BUILD
+                  ? StageStatus.OUT_OF_SCOPE
+                  : notImplemented(stage) ? StageStatus.NOT_IMPLEMENTED : StageStatus.PENDING;
       UUID attempt = insertAttempt(id, stage, 1, status);
       if (stage == InitiativeStage.REQUIREMENT_INTAKE) {
         insertEvent(
@@ -271,7 +271,6 @@ public class InitiativeRepository {
   private boolean notImplemented(InitiativeStage stage) {
     return stage == InitiativeStage.TARGETING_DESIGN
         || stage == InitiativeStage.FEATURE_DESIGN
-        || stage == InitiativeStage.CANDIDATE_BUILD
         || stage == InitiativeStage.EXPERIMENT_DESIGN
         || stage == InitiativeStage.HANDOFF;
   }
