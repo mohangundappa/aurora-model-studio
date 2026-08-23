@@ -1279,7 +1279,7 @@ class InitiativeServiceTest {
     ModelRequirement requirement =
         requirement(
             List.of("BOOKING_COMPLETED"),
-            Map.of("requiredFeatures", List.of("generated-feature")),
+            Map.of("requiredFeatures", List.of("generated-feature", "booking-intent")),
             "30d",
             "batch",
             "sessions");
@@ -1322,11 +1322,20 @@ class InitiativeServiceTest {
     when(repository.latestAttempt(initiativeId, InitiativeStage.DATA_FEASIBILITY))
         .thenReturn(Optional.of(feasibility));
     when(discovery.getRequirement(any())).thenReturn(requirement);
+    KnowledgeObject approved = feature(UUID.randomUUID(), "booking-intent");
+    KnowledgeObject extracted =
+        withLifecycle(withVersion(feature(UUID.randomUUID(), "booking-intent"), 2), "EXTRACTED");
+    KnowledgeObject pending =
+        withLifecycle(
+            withVersion(feature(UUID.randomUUID(), "booking-intent"), 3), "PENDING_REVIEW");
     when(knowledge.search("FEATURE", null, null, null, null, null, true))
-        .thenReturn(List.of(candidate));
+        .thenReturn(List.of(candidate, extracted, pending, approved));
     when(knowledge.search(null, null, null, null, null, null, true))
-        .thenReturn(List.of(outcome, candidate));
+        .thenReturn(List.of(outcome, candidate, extracted, pending, approved));
     when(knowledge.get(candidate.id(), true)).thenReturn(packageFor(candidate));
+    when(knowledge.get(extracted.id(), true)).thenReturn(packageFor(extracted));
+    when(knowledge.get(pending.id(), true)).thenReturn(packageFor(pending));
+    when(knowledge.get(approved.id(), true)).thenReturn(packageFor(approved));
     when(knowledge.get(outcome.id(), true)).thenReturn(packageFor(outcome));
     when(repository.attempts(initiativeId))
         .thenReturn(allAttempts(handoff, experiment), allAttempts(handoff, experiment));
@@ -1343,7 +1352,9 @@ class InitiativeServiceTest {
             anyLong(),
             eq(0L),
             org.mockito.ArgumentMatchers.argThat(
-                blockers -> blockers.contains("FEATURE_NOT_APPROVED:feature:generated-feature")),
+                blockers ->
+                    blockers.contains("FEATURE_NOT_APPROVED:feature:generated-feature")
+                        && !blockers.contains("FEATURE_NOT_APPROVED:feature:booking-intent")),
             eq(List.of()),
             eq(List.of()));
   }
@@ -1354,7 +1365,7 @@ class InitiativeServiceTest {
     ModelRequirement requirement =
         requirement(
             List.of("BOOKING_COMPLETED"),
-            Map.of("modelName", "booking-intent"),
+            Map.of("modelName", "booking-intent", "requiredFeatures", List.of("booking-intent")),
             "30d",
             "batch",
             "sessions");
@@ -1374,7 +1385,24 @@ class InitiativeServiceTest {
         new InitiativeService(
             repository, discovery, knowledge, gateway, client, new ObjectMapper());
     prepareHandoffPackage(base, requirement, outcome, experiment, handoff);
+    KnowledgeObject approvedFeature = feature(UUID.randomUUID(), "booking-intent");
+    KnowledgeObject newerExtracted =
+        withLifecycle(withVersion(feature(UUID.randomUUID(), "booking-intent"), 2), "EXTRACTED");
+    when(knowledge.search("FEATURE", null, null, null, null, null, true))
+        .thenReturn(List.of(newerExtracted, approvedFeature));
+    when(knowledge.search(null, null, null, null, null, null, true))
+        .thenReturn(List.of(outcome, newerExtracted, approvedFeature));
+    when(knowledge.get(newerExtracted.id(), true)).thenReturn(packageFor(newerExtracted));
+    when(knowledge.get(approvedFeature.id(), true)).thenReturn(packageFor(approvedFeature));
     HandoffPackage approved = invokeBuildPackage(serviceWithClient, base);
+    assertThat(approved.content().get("requirementId")).isEqualTo(base.requirementId().toString());
+    assertThat(approved.content().get("features"))
+        .isEqualTo(
+            List.of(
+                Map.of(
+                    "knowledgeId", approvedFeature.id().toString(),
+                    "knowledgeKey", approvedFeature.knowledgeKey(),
+                    "version", approvedFeature.version())));
     when(repository.findPackage(handoff.artifacts().getFirst().id()))
         .thenReturn(Optional.of(approved));
     when(client.register(any(), any(), any()))
@@ -1390,6 +1418,7 @@ class InitiativeServiceTest {
     ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
     verify(client).register(eq("booking-intent"), payload.capture(), eq(approved.hash()));
     assertThat(payload.getValue()).containsEntry("packageHash", approved.hash());
+    assertThat(payload.getValue()).containsEntry("requirementId", base.requirementId().toString());
     assertThat(payload.getValue().get("targeting")).isEqualTo(approved.content().get("targeting"));
     verify(repository, never()).savePackage(any(), any(), any());
   }
@@ -1638,6 +1667,35 @@ class InitiativeServiceTest {
         object.clientTaxonomy(),
         object.tags(),
         lifecycle,
+        object.effectiveFrom(),
+        object.effectiveTo(),
+        object.confidence(),
+        object.confidenceBreakdown(),
+        object.qualityAssessment(),
+        object.llmInvocationId(),
+        object.extractedBy(),
+        object.reviewedBy(),
+        object.approvedBy(),
+        object.approvalComments(),
+        object.attributes(),
+        object.synthetic());
+  }
+
+  private KnowledgeObject withVersion(KnowledgeObject object, int version) {
+    return new KnowledgeObject(
+        object.id(),
+        object.clientId(),
+        object.knowledgeKey(),
+        version,
+        object.knowledgeType(),
+        object.name(),
+        object.businessDomain(),
+        object.businessUseCase(),
+        object.businessDescription(),
+        object.canonicalTaxonomy(),
+        object.clientTaxonomy(),
+        object.tags(),
+        object.lifecycleStatus(),
         object.effectiveFrom(),
         object.effectiveTo(),
         object.confidence(),

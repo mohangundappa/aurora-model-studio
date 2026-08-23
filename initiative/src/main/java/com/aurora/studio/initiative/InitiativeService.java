@@ -1081,9 +1081,10 @@ public class InitiativeService {
     return available.stream()
         .filter(object -> names.stream().anyMatch(name -> object.name().equalsIgnoreCase(name)))
         .sorted(
+            // Only approved knowledge is trusted; within that lifecycle choice, newest wins.
             Comparator.comparing(KnowledgeObject::knowledgeKey)
-                .thenComparingInt(KnowledgeObject::version)
-                .reversed())
+                .thenComparingInt(object -> -featureLifecyclePriority(object.lifecycleStatus()))
+                .thenComparingInt(object -> -object.version()))
         .collect(
             java.util.stream.Collectors.collectingAndThen(
                 java.util.stream.Collectors.toMap(
@@ -1092,6 +1093,12 @@ public class InitiativeService {
                     (first, ignored) -> first,
                     LinkedHashMap::new),
                 map -> List.copyOf(map.values())));
+  }
+
+  private int featureLifecyclePriority(String lifecycleStatus) {
+    if ("APPROVED".equals(lifecycleStatus)) return 2;
+    if ("PENDING_REVIEW".equals(lifecycleStatus)) return 1;
+    return 0;
   }
 
   private HandoffPackage buildPackage(InitiativeRepository.Base base) {
