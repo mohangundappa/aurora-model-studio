@@ -150,6 +150,9 @@ if [[ "$experiment_unknowns" != "$expected_experiment_unknowns" ]]; then
   exit 1
 fi
 
+# These approvals are deliberately scripted walkthrough actions, not human
+# review. The actor and reason identify that fact so the demo cannot imply
+# that a person accepted the unknowns.
 feasibility_unknowns="$(
   jq -c '[.attempts[-1].feasibilityChecks[] | select(.status == "UNKNOWN") | .name]' \
     <<<"$reuse_feasibility"

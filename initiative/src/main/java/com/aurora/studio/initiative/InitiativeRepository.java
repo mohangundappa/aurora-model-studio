@@ -326,6 +326,19 @@ public class InitiativeRepository {
         json(packageContent));
   }
 
+  public Optional<HandoffPackage> findPackage(UUID packageId) {
+    return jdbc
+        .query(
+            "select package_hash,package::text from initiative_handoff_packages where client_id=? and id=?",
+            (rs, row) ->
+                HandoffPackage.stored(
+                    rs.getString("package_hash"), readMap(rs.getString("package"))),
+            ClientContext.require(),
+            packageId)
+        .stream()
+        .findFirst();
+  }
+
   public UUID saveHandoffAttempt(
       UUID initiativeId,
       UUID stageAttemptId,

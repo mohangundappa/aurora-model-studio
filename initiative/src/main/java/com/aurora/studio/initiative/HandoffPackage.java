@@ -15,6 +15,10 @@ import java.util.List;
 import java.util.Map;
 
 public record HandoffPackage(String hash, Map<String, Object> content) {
+  public static HandoffPackage stored(String hash, Map<String, Object> content) {
+    return new HandoffPackage(hash, immutableMap(content));
+  }
+
   public static HandoffPackage create(ObjectMapper mapper, Map<String, Object> content) {
     Map<String, Object> ordered = immutableMap(content);
     try {

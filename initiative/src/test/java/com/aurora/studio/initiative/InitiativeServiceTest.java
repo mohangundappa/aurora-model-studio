@@ -24,6 +24,7 @@ import com.aurora.studio.knowledge.KnowledgeObject;
 import com.aurora.studio.knowledge.KnowledgePackage;
 import com.aurora.studio.knowledge.KnowledgeRelationship;
 import com.aurora.studio.knowledge.KnowledgeService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -1165,6 +1166,57 @@ class InitiativeServiceTest {
   }
 
   @Test
+  void experimentDesignComputesKnownPerVariantSampleSizeDeterministically() {
+    KnowledgeObject outcome = observable(UUID.randomUUID(), "BOOKING_COMPLETED");
+    ModelRequirement requirement =
+        new ModelRequirement(
+            "domain",
+            "use-case",
+            "BOOKING_COMPLETED",
+            "BOOKING_COMPLETED",
+            "sessions",
+            "30d",
+            "batch",
+            "action",
+            Map.of(
+                "baselineConversionRate", 0.10,
+                "minimumDetectableEffect", 0.02,
+                "alpha", 0.05,
+                "power", 0.80),
+            Map.of(),
+            Map.of(),
+            List.of("BOOKING_COMPLETED"),
+            false);
+    InitiativeRepository.Attempt experiment =
+        attempt(attemptId, InitiativeStage.EXPERIMENT_DESIGN, StageStatus.PENDING, 1);
+    InitiativeRepository.Attempt feature =
+        attempt(UUID.randomUUID(), InitiativeStage.FEATURE_DESIGN, StageStatus.COMPLETED, 1);
+    when(repository.find(initiativeId)).thenReturn(Optional.of(base()));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.EXPERIMENT_DESIGN))
+        .thenReturn(Optional.of(experiment));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.FEATURE_DESIGN))
+        .thenReturn(Optional.of(feature));
+    when(discovery.getRequirement(any())).thenReturn(requirement);
+    when(knowledge.search(null, null, null, null, null, null, true)).thenReturn(List.of(outcome));
+    when(repository.attempts(initiativeId)).thenReturn(allAttempts(experiment, feature));
+    when(repository.decisions(initiativeId)).thenReturn(List.of());
+    when(repository.events(initiativeId)).thenReturn(List.of());
+
+    service.runStage(initiativeId, InitiativeStage.EXPERIMENT_DESIGN);
+
+    ArgumentCaptor<List<GenerationDraft>> drafts = ArgumentCaptor.forClass(List.class);
+    verify(repository).saveDrafts(eq(attemptId), drafts.capture(), any());
+    Map<String, Object> design = drafts.getValue().getFirst().payload();
+    assertThat(design.get("allocationSource")).isEqualTo("DEFAULT");
+    assertThat(((Map<?, ?>) design.get("sampleSize")).get("minimumExposuresPerVariant"))
+        .isEqualTo(3841);
+    assertThat((String) design.get("decisionRule"))
+        .contains("3841 exposures per variant")
+        .contains("alpha 0.0500")
+        .contains("power 0.8000");
+  }
+
+  @Test
   void invalidExperimentVariantsBlockBeforeHandoff() {
     KnowledgeObject outcome = observable(UUID.randomUUID(), "BOOKING_COMPLETED");
     Map<String, Object> invalidTreatment =
@@ -1294,6 +1346,154 @@ class InitiativeServiceTest {
                 blockers -> blockers.contains("FEATURE_NOT_APPROVED:feature:generated-feature")),
             eq(List.of()),
             eq(List.of()));
+  }
+
+  @Test
+  void handoffRegistersThePackageBoundToTheAwaitingAttempt() throws Exception {
+    KnowledgeObject outcome = observable(UUID.randomUUID(), "BOOKING_COMPLETED");
+    ModelRequirement requirement =
+        requirement(
+            List.of("BOOKING_COMPLETED"),
+            Map.of("modelName", "booking-intent"),
+            "30d",
+            "batch",
+            "sessions");
+    InitiativeRepository.Attempt experiment =
+        experimentAttempt(
+            UUID.randomUUID(),
+            new GenerationDraft(
+                "EXPERIMENT",
+                Map.of("primaryOutcomeEvent", "BOOKING_COMPLETED"),
+                "ACCEPTED",
+                null,
+                List.of()));
+    InitiativeRepository.Attempt handoff = awaitingHandoff(UUID.randomUUID(), experiment);
+    InitiativeRepository.Base base = base();
+    AuroraCandidateClient client = org.mockito.Mockito.mock(AuroraCandidateClient.class);
+    InitiativeService serviceWithClient =
+        new InitiativeService(
+            repository, discovery, knowledge, gateway, client, new ObjectMapper());
+    prepareHandoffPackage(base, requirement, outcome, experiment, handoff);
+    HandoffPackage approved = invokeBuildPackage(serviceWithClient, base);
+    when(repository.findPackage(handoff.artifacts().getFirst().id()))
+        .thenReturn(Optional.of(approved));
+    when(client.register(any(), any(), any()))
+        .thenReturn(
+            new AuroraCandidateClient.Registration(
+                true, 201, "candidate-1", "AWAITING_WEIGHTS", null));
+
+    serviceWithClient.decide(
+        initiativeId,
+        InitiativeStage.HANDOFF,
+        new GateDecisionRequest("APPROVE", "reviewer", "Approved design package"));
+
+    ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+    verify(client).register(eq("booking-intent"), payload.capture(), eq(approved.hash()));
+    assertThat(payload.getValue()).containsEntry("packageHash", approved.hash());
+    assertThat(payload.getValue().get("targeting")).isEqualTo(approved.content().get("targeting"));
+    verify(repository, never()).savePackage(any(), any(), any());
+  }
+
+  @Test
+  void handoffRefusesWhenThePackageChangesAfterApproval() throws Exception {
+    KnowledgeObject outcome = observable(UUID.randomUUID(), "BOOKING_COMPLETED");
+    ModelRequirement approvedRequirement =
+        requirement(
+            List.of("BOOKING_COMPLETED"),
+            Map.of("modelName", "booking-intent"),
+            "30d",
+            "batch",
+            "sessions");
+    ModelRequirement changedRequirement =
+        requirement(
+            List.of("BOOKING_COMPLETED"),
+            Map.of("modelName", "changed-model"),
+            "30d",
+            "batch",
+            "sessions");
+    InitiativeRepository.Attempt experiment =
+        experimentAttempt(
+            UUID.randomUUID(),
+            new GenerationDraft(
+                "EXPERIMENT",
+                Map.of("primaryOutcomeEvent", "BOOKING_COMPLETED"),
+                "ACCEPTED",
+                null,
+                List.of()));
+    InitiativeRepository.Attempt handoff = awaitingHandoff(UUID.randomUUID(), experiment);
+    InitiativeRepository.Base base = base();
+    AuroraCandidateClient client = org.mockito.Mockito.mock(AuroraCandidateClient.class);
+    InitiativeService serviceWithClient =
+        new InitiativeService(
+            repository, discovery, knowledge, gateway, client, new ObjectMapper());
+    prepareHandoffPackage(base, approvedRequirement, outcome, experiment, handoff);
+    when(discovery.getRequirement(any())).thenReturn(approvedRequirement, changedRequirement);
+    HandoffPackage approved = invokeBuildPackage(serviceWithClient, base);
+    when(repository.findPackage(handoff.artifacts().getFirst().id()))
+        .thenReturn(Optional.of(approved));
+
+    serviceWithClient.decide(
+        initiativeId,
+        InitiativeStage.HANDOFF,
+        new GateDecisionRequest("APPROVE", "reviewer", "Approved design package"));
+
+    verify(client, never()).register(any(), any(), any());
+    verify(repository)
+        .finish(
+            eq(handoff.id()),
+            eq(StageStatus.BLOCKED),
+            any(),
+            anyLong(),
+            anyLong(),
+            eq(List.of("PACKAGE_CHANGED_SINCE_APPROVAL")),
+            eq(List.of()),
+            eq(handoff.artifacts()));
+  }
+
+  @Test
+  void handoffRequiresModelNameDeclaredByRequirement() {
+    KnowledgeObject outcome = observable(UUID.randomUUID(), "BOOKING_COMPLETED");
+    ModelRequirement requirement =
+        new ModelRequirement(
+            "domain",
+            "use-case",
+            "BOOKING_COMPLETED",
+            "BOOKING_COMPLETED",
+            "sessions",
+            "30d",
+            "batch",
+            "action",
+            Map.of(),
+            Map.of(),
+            Map.of(),
+            List.of("BOOKING_COMPLETED"),
+            false);
+    InitiativeRepository.Attempt experiment =
+        experimentAttempt(
+            UUID.randomUUID(),
+            new GenerationDraft(
+                "EXPERIMENT",
+                Map.of("primaryOutcomeEvent", "BOOKING_COMPLETED"),
+                "ACCEPTED",
+                null,
+                List.of()));
+    InitiativeRepository.Attempt handoff =
+        attempt(attemptId, InitiativeStage.HANDOFF, StageStatus.PENDING, 1);
+    InitiativeRepository.Base base = base();
+    prepareHandoffPackage(base, requirement, outcome, experiment, handoff);
+
+    service.runStage(initiativeId, InitiativeStage.HANDOFF);
+
+    verify(repository)
+        .finish(
+            eq(handoff.id()),
+            eq(StageStatus.BLOCKED),
+            any(),
+            anyLong(),
+            eq(0L),
+            eq(List.of("MISSING_MODEL_NAME")),
+            eq(List.of()),
+            eq(handoff.artifacts()));
   }
 
   @Test
@@ -1595,6 +1795,94 @@ class InitiativeServiceTest {
   private InitiativeRepository.Base base() {
     return new InitiativeRepository.Base(
         initiativeId, UUID.randomUUID(), false, null, Instant.now());
+  }
+
+  private void prepareHandoffPackage(
+      InitiativeRepository.Base base,
+      ModelRequirement requirement,
+      KnowledgeObject outcome,
+      InitiativeRepository.Attempt experiment,
+      InitiativeRepository.Attempt handoff) {
+    when(repository.find(initiativeId)).thenReturn(Optional.of(base));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.HANDOFF))
+        .thenReturn(Optional.of(handoff));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.TARGETING_DESIGN))
+        .thenReturn(
+            Optional.of(
+                attempt(
+                    UUID.randomUUID(),
+                    InitiativeStage.TARGETING_DESIGN,
+                    StageStatus.COMPLETED,
+                    1)));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.FEATURE_DESIGN))
+        .thenReturn(
+            Optional.of(
+                attempt(
+                    UUID.randomUUID(), InitiativeStage.FEATURE_DESIGN, StageStatus.COMPLETED, 1)));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.EXPERIMENT_DESIGN))
+        .thenReturn(Optional.of(experiment));
+    when(repository.latestAttempt(initiativeId, InitiativeStage.DATA_FEASIBILITY))
+        .thenReturn(
+            Optional.of(
+                attempt(
+                    UUID.randomUUID(),
+                    InitiativeStage.DATA_FEASIBILITY,
+                    StageStatus.COMPLETED,
+                    1)));
+    when(discovery.getRequirement(any())).thenReturn(requirement);
+    when(knowledge.search("FEATURE", null, null, null, null, null, true)).thenReturn(List.of());
+    when(knowledge.search(null, null, null, null, null, null, true)).thenReturn(List.of(outcome));
+    when(knowledge.get(outcome.id(), true)).thenReturn(packageFor(outcome));
+    when(repository.decisions(initiativeId)).thenReturn(List.of());
+    when(repository.attempts(initiativeId)).thenReturn(allAttempts(handoff, experiment));
+    when(repository.events(initiativeId)).thenReturn(List.of());
+  }
+
+  private HandoffPackage invokeBuildPackage(
+      InitiativeService service, InitiativeRepository.Base base) throws Exception {
+    java.lang.reflect.Method method =
+        InitiativeService.class.getDeclaredMethod("buildPackage", InitiativeRepository.Base.class);
+    method.setAccessible(true);
+    return (HandoffPackage) method.invoke(service, base);
+  }
+
+  private InitiativeRepository.Attempt experimentAttempt(UUID id, GenerationDraft draft) {
+    return new InitiativeRepository.Attempt(
+        id,
+        InitiativeStage.EXPERIMENT_DESIGN,
+        1,
+        StageStatus.COMPLETED,
+        null,
+        null,
+        0,
+        0,
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(draft),
+        1,
+        0,
+        List.of());
+  }
+
+  private InitiativeRepository.Attempt awaitingHandoff(
+      UUID packageId, InitiativeRepository.Attempt experiment) {
+    return new InitiativeRepository.Attempt(
+        attemptId,
+        InitiativeStage.HANDOFF,
+        1,
+        StageStatus.AWAITING_APPROVAL,
+        Instant.now().minusSeconds(2),
+        Instant.now().minusSeconds(1),
+        5,
+        0,
+        List.of(),
+        List.of(),
+        List.of(new ArtifactReference("HANDOFF_PACKAGE", packageId, false)),
+        List.of(),
+        0,
+        0,
+        List.of());
   }
 
   private List<InitiativeRepository.Attempt> allAttempts(InitiativeRepository.Attempt replacement) {
