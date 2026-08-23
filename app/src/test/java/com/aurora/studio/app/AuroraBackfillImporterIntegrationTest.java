@@ -69,6 +69,10 @@ class AuroraBackfillImporterIntegrationTest {
   void fixtureImportIsIdempotentAndChangedSourcesCreateVersions(@TempDir Path temp)
       throws Exception {
     Path fixture = copyFixture(temp);
+    Files.createDirectories(fixture.resolve("signals/src/main/resources/signals/stray-directory"));
+    Path bookingSignal = fixture.resolve("signals/src/main/resources/signals/booking-intent.yaml");
+    Files.writeString(
+        bookingSignal, Files.readString(bookingSignal) + "\nlifecycleStatus: DEPLOYED\n");
 
     AuroraBackfillImporter.ImportResult first = importer.importRepository(fixture);
     assertThat(first.counts())
@@ -80,6 +84,20 @@ class AuroraBackfillImporterIntegrationTest {
                 "DATA_ASSET", 5,
                 "STANDARD", 4));
     assertThat(countObjects()).isEqualTo(15);
+    assertThat(
+            jdbc.queryForObject(
+                "select attributes->>'lifecycleStatus' is not null from knowledge_objects where client_id=? and knowledge_key=?",
+                Boolean.class,
+                CLIENT,
+                "feature:booking-intent"))
+        .isFalse();
+    assertThat(
+            jdbc.queryForObject(
+                "select attributes->'sourceDeclared'->>'lifecycleStatus' from knowledge_objects where client_id=? and knowledge_key=?",
+                String.class,
+                CLIENT,
+                "feature:booking-intent"))
+        .isEqualTo("DEPLOYED");
 
     AuroraBackfillImporter.ImportResult second = importer.importRepository(fixture);
     assertThat(second.counts()).isEmpty();

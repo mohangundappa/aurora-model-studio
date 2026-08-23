@@ -2,21 +2,28 @@ package com.aurora.studio.extraction;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.aurora.studio.common.ClientContext;
+import com.aurora.studio.common.KnowledgeType;
 import com.aurora.studio.gateway.LlmGateway;
 import com.aurora.studio.gateway.LlmOutcome;
 import com.aurora.studio.gateway.LlmResult;
+import com.aurora.studio.knowledge.KnowledgeEvidence;
+import com.aurora.studio.knowledge.KnowledgeObject;
 import com.aurora.studio.knowledge.KnowledgeRepository;
 import com.aurora.studio.knowledge.KnowledgeService;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 class ExtractionServiceTest {
   @Test
@@ -123,6 +130,93 @@ class ExtractionServiceTest {
     ExtractionService service = new ExtractionService(parser, gateway, knowledge, repository, 0.72);
     assertThat(service.extractArtifacts(List.of(artifact), false).candidateIds()).isEmpty();
     verify(knowledge, never()).createExtracted(any(), any(), any());
+  }
+
+  @Test
+  void extractionKeepsSourceGovernanceMetadataInSeparateNamespace() {
+    StructuralParser parser = new StructuralParser();
+    LlmGateway gateway = mock(LlmGateway.class);
+    KnowledgeService knowledge = mock(KnowledgeService.class);
+    KnowledgeRepository repository = mock(KnowledgeRepository.class);
+    UUID objectId = UUID.randomUUID();
+    KnowledgeObject object = mock(KnowledgeObject.class);
+    when(object.id()).thenReturn(objectId);
+    when(object.knowledgeType()).thenReturn(KnowledgeType.FEATURE);
+    KnowledgeEvidence evidence =
+        new KnowledgeEvidence(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            objectId,
+            "test",
+            "source-file",
+            "signal.yaml",
+            "v1",
+            "booking-intent",
+            1.0,
+            Instant.now());
+    when(gateway.complete(any()))
+        .thenReturn(
+            new LlmResult(
+                UUID.randomUUID(),
+                LlmOutcome.OK,
+                Map.of(
+                    "fields",
+                    List.of(
+                        Map.of(
+                            "field",
+                            "businessRationale",
+                            "value",
+                            "booking-intent",
+                            "citation",
+                            "booking-intent",
+                            "classification",
+                            "EVIDENCE_BACKED")),
+                    "relationships",
+                    List.of()),
+                null,
+                1,
+                1,
+                0,
+                1,
+                0));
+    when(knowledge.createExtracted(any(), any(), any())).thenReturn(object);
+    when(knowledge.addEvidence(any(), any(), any(), any(), any(), any(), anyDouble()))
+        .thenReturn(evidence);
+    Artifact artifact =
+        new Artifact(
+            Path.of("signal.yaml"),
+            "FEATURE",
+            "booking-intent",
+            "name: booking-intent\ninputs: [ROOM_VIEWED]\ncalculationType: RULE\nlifecycleStatus: DEPLOYED\nconfidence: 0.8\n",
+            new StructuralFact(
+                "booking-intent",
+                "FEATURE",
+                "booking-intent",
+                Map.of(
+                    "contentLength",
+                    107,
+                    "sourceDeclared",
+                    Map.of("lifecycleStatus", "DEPLOYED", "confidence", 0.8)),
+                List.of(),
+                List.of(),
+                "signal.yaml",
+                "hash",
+                "name: booking-intent"));
+
+    ExtractionService service = new ExtractionService(parser, gateway, knowledge, repository, 0.72);
+    ClientContext.set(UUID.randomUUID());
+    try {
+      service.extractArtifacts(List.of(artifact), false);
+    } finally {
+      ClientContext.clear();
+    }
+
+    ArgumentCaptor<KnowledgeService.Draft> draft =
+        ArgumentCaptor.forClass(KnowledgeService.Draft.class);
+    verify(knowledge).createExtracted(draft.capture(), any(), any());
+    assertThat(draft.getValue().attributes())
+        .containsEntry("sourceDeclared", Map.of("lifecycleStatus", "DEPLOYED", "confidence", 0.8));
+    assertThat(draft.getValue().attributes()).doesNotContainKeys("lifecycleStatus", "confidence");
   }
 
   @Test

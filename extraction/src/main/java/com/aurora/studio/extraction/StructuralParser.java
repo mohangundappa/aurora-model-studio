@@ -199,18 +199,38 @@ public class StructuralParser {
   private Artifact parsedArtifact(
       Path path, String kind, String name, String content, String key, String sourceHash) {
     String excerpt = content.substring(0, Math.min(1200, content.length()));
+    Map<String, Object> structuralAttributes = new java.util.LinkedHashMap<>();
+    structuralAttributes.put("contentLength", content.length());
+    Map<String, Object> sourceDeclared = sourceDeclaredGovernance(content);
+    if (!sourceDeclared.isEmpty()) structuralAttributes.put("sourceDeclared", sourceDeclared);
     StructuralFact fact =
         new StructuralFact(
             name,
             kind,
             name,
-            Map.of("contentLength", content.length()),
+            structuralAttributes,
             identifiers(content, "table"),
             identifiers(content, "column"),
             path.toString(),
             sourceHash,
             excerpt);
     return new Artifact(path, kind, name, excerpt, fact, key);
+  }
+
+  private Map<String, Object> sourceDeclaredGovernance(String content) {
+    Object loaded;
+    try {
+      loaded = new Yaml().load(content);
+    } catch (RuntimeException exception) {
+      return Map.of();
+    }
+    if (!(loaded instanceof Map<?, ?> source)) return Map.of();
+    Map<String, Object> declared = new java.util.LinkedHashMap<>();
+    for (String field :
+        List.of("lifecycleStatus", "approvalStatus", "confidence", "approvedBy", "reviewedBy")) {
+      if (source.containsKey(field)) declared.put(field, source.get(field));
+    }
+    return declared;
   }
 
   private boolean matches(Path path, Path sourceRoot, List<String> patterns) {

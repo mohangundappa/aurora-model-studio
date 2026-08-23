@@ -42,39 +42,51 @@ public class AuroraBackfillImporter {
       Map<String, Integer> counts = new LinkedHashMap<>();
       Map<String, UUID> objects = new HashMap<>();
       Path signalDir = root.resolve("signals/src/main/resources/signals");
-      for (Path file : Files.list(signalDir).sorted().toList()) {
-        Map<String, Object> source = readYaml(file);
-        String name = String.valueOf(source.get("name"));
-        String hash = hash(file);
-        Map<String, Object> attributes = new LinkedHashMap<>(source);
-        attributes.put("businessDefinition", source.get("explanationTemplate"));
-        attributes.put("entity", "customer");
-        attributes.put("observationWindow", source.get("lookback"));
-        attributes.put("pointInTimeAvailable", true);
-        attributes.put("inputs", source.get("inputs"));
-        attributes.put(
-            "sourceConstraints",
-            Map.of(
-                "freshness",
-                source.get("freshness"),
-                "expiry",
-                source.get("expiry"),
-                "consentRequired",
-                source.get("consentRequired")));
-        KnowledgeObject feature =
-            createIfChanged(
-                "feature:" + name,
-                KnowledgeType.FEATURE,
-                name,
-                "customer intelligence",
-                "customer signal development",
-                String.valueOf(source.get("explanationTemplate")),
-                attributes,
-                file,
-                hash,
-                root,
-                counts);
-        if (feature != null) objects.put(name, feature.id());
+      try (var files = Files.list(signalDir)) {
+        for (Path file :
+            files
+                .filter(Files::isRegularFile)
+                .filter(
+                    candidate -> {
+                      String name = candidate.getFileName().toString().toLowerCase();
+                      return name.endsWith(".yaml") || name.endsWith(".yml");
+                    })
+                .sorted()
+                .toList()) {
+          Map<String, Object> source = readYaml(file);
+          String name = String.valueOf(source.get("name"));
+          String hash = hash(file);
+          Map<String, Object> attributes = new LinkedHashMap<>(source);
+          moveSourceDeclaredGovernance(attributes);
+          attributes.put("businessDefinition", source.get("explanationTemplate"));
+          attributes.put("entity", "customer");
+          attributes.put("observationWindow", source.get("lookback"));
+          attributes.put("pointInTimeAvailable", true);
+          attributes.put("inputs", source.get("inputs"));
+          attributes.put(
+              "sourceConstraints",
+              Map.of(
+                  "freshness",
+                  source.get("freshness"),
+                  "expiry",
+                  source.get("expiry"),
+                  "consentRequired",
+                  source.get("consentRequired")));
+          KnowledgeObject feature =
+              createIfChanged(
+                  "feature:" + name,
+                  KnowledgeType.FEATURE,
+                  name,
+                  "customer intelligence",
+                  "customer signal development",
+                  String.valueOf(source.get("explanationTemplate")),
+                  attributes,
+                  file,
+                  hash,
+                  root,
+                  counts);
+          if (feature != null) objects.put(name, feature.id());
+        }
       }
       Path calculatorDir = root.resolve("signals/src/main/java/com/aurora/signals");
       for (String name : List.copyOf(objects.keySet())) {
@@ -326,6 +338,15 @@ public class AuroraBackfillImporter {
                 java.util.stream.Collectors.toMap(
                     e -> String.valueOf(e.getKey()), Map.Entry::getValue))
         : Map.of();
+  }
+
+  private void moveSourceDeclaredGovernance(Map<String, Object> attributes) {
+    Map<String, Object> sourceDeclared = new LinkedHashMap<>();
+    for (String field :
+        List.of("lifecycleStatus", "approvalStatus", "confidence", "approvedBy", "reviewedBy")) {
+      if (attributes.containsKey(field)) sourceDeclared.put(field, attributes.remove(field));
+    }
+    if (!sourceDeclared.isEmpty()) attributes.put("sourceDeclared", sourceDeclared);
   }
 
   private String excerpt(Path file) throws IOException {
