@@ -105,13 +105,21 @@ public class ExtractionService {
     int unchangedArtifacts = 0;
     for (Artifact artifact : artifacts) {
       String sourceVersion = revision + ":" + artifact.structuralFact().sourceHash();
-      if (!seenKeys.add(artifact.knowledgeKey())
-          || repository.hasEvidence(artifact.knowledgeKey(), sourceVersion)) {
+      if (!seenKeys.add(artifact.knowledgeKey())) {
         unchangedArtifacts++;
         continue;
       }
       ExtractionCandidate candidate = interpret(artifact, synthetic);
       if (candidate == null) continue;
+      java.util.Optional<KnowledgeObject> latest =
+          repository.findLatest(candidate.draft().knowledgeKey());
+      if (latest != null
+          && latest
+              .filter(existing -> sameInterpretation(existing, candidate.draft()))
+              .isPresent()) {
+        unchangedArtifacts++;
+        continue;
+      }
       KnowledgeObject object =
           knowledge.createExtracted(
               candidate.draft(), "extraction-runner", candidate.result().invocationId());
@@ -126,6 +134,16 @@ public class ExtractionService {
       counts.merge(object.knowledgeType().name(), 1, Integer::sum);
     }
     return new ExtractionRun(counts, candidates, synthetic, skippedArtifacts, unchangedArtifacts);
+  }
+
+  private boolean sameInterpretation(KnowledgeObject existing, KnowledgeService.Draft candidate) {
+    return existing.knowledgeType() == candidate.knowledgeType()
+        && existing.name().equals(candidate.name())
+        && existing.businessDomain().equals(candidate.businessDomain())
+        && existing.businessUseCase().equals(candidate.businessUseCase())
+        && existing.businessDescription().equals(candidate.businessDescription())
+        && existing.attributes().equals(candidate.attributes())
+        && existing.synthetic() == candidate.synthetic();
   }
 
   public ExtractionRun extractSyntheticEstate() {

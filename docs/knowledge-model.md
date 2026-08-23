@@ -1,3 +1,11 @@
+## Source-declared governance metadata
+
+Governance columns such as `lifecycle_status`, `confidence`, and approval actors are
+authoritative Model Studio state. A source artifact may also declare descriptive
+metadata with names such as `lifecycleStatus` or `confidence`; importer and extraction
+store those values only under `attributes.sourceDeclared`. They are never copied into
+authoritative columns, cannot approve an object, cannot change its confidence, and
+must not be mistaken for Model Studio review state.
 # Enterprise Knowledge model
 
 ## Objects, evidence, and tenants

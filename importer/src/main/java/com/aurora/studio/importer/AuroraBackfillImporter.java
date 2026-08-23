@@ -174,6 +174,19 @@ public class AuroraBackfillImporter {
                 model.id(),
                 "USES",
                 features.get(feature));
+            for (UUID implementationId :
+                jdbc.queryForList(
+                    "select to_object_id from knowledge_relationships where client_id=? and from_object_id=? and relationship_type='IMPLEMENTED_BY'",
+                    UUID.class,
+                    IMPORT_CLIENT,
+                    features.get(feature))) {
+              jdbc.update(
+                  "insert into knowledge_relationships(client_id,from_object_id,relationship_type,to_object_id) values(?,?,?,?) on conflict do nothing",
+                  IMPORT_CLIENT,
+                  model.id(),
+                  "IMPLEMENTED_BY",
+                  implementationId);
+            }
             linked = true;
           }
         }
@@ -184,8 +197,25 @@ public class AuroraBackfillImporter {
               model.id(),
               "USES",
               features.get("booking-intent"));
+          linkImplementations(model.id(), features.get("booking-intent"));
         }
       }
+    }
+  }
+
+  private void linkImplementations(UUID modelId, UUID featureId) {
+    for (UUID implementationId :
+        jdbc.queryForList(
+            "select to_object_id from knowledge_relationships where client_id=? and from_object_id=? and relationship_type='IMPLEMENTED_BY'",
+            UUID.class,
+            IMPORT_CLIENT,
+            featureId)) {
+      jdbc.update(
+          "insert into knowledge_relationships(client_id,from_object_id,relationship_type,to_object_id) values(?,?,?,?) on conflict do nothing",
+          IMPORT_CLIENT,
+          modelId,
+          "IMPLEMENTED_BY",
+          implementationId);
     }
   }
 
@@ -210,10 +240,16 @@ public class AuroraBackfillImporter {
           "analytics data foundation",
           entry.getValue(),
           Map.of(
-              "grain", entry.getValue().split(";")[0],
-              "primaryKey", "repository-defined row identifier",
-              "eventTime", "event_time",
-              "history", "retained in PostgreSQL tables"),
+              "grain",
+              entry.getValue().split(";")[0],
+              "primaryKey",
+              "repository-defined row identifier",
+              "eventTime",
+              "event_time",
+              "history",
+              "retained in PostgreSQL tables",
+              "observables",
+              List.of("BOOKING_COMPLETED", "PROPERTY_VIEWED", "BOOKING_STARTED")),
           migration,
           hash(migration) + ":" + entry.getKey(),
           root,

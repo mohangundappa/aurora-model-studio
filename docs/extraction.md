@@ -23,7 +23,9 @@ Extraction has two ordered passes.
 
 Structural fields are `EVIDENCE_BACKED` with certainty `1.0`. Interpreted
 fields carry their classification and the configured “model-interpreted”
-certainty; the model cannot choose that value. Extraction can create only
+certainty (`studio.extraction.interpreted-certainty`, 0.72 in the local
+demonstration configuration, representing grounded-but-model-derived claims);
+the model cannot choose that value. Extraction can create only
 `EXTRACTED` candidates. It cannot provide confidence, approve an object, or
 advance lifecycle status. Confidence remains derived by the Knowledge service
 from evidence and populated attributes, with unknown signals excluded and
@@ -36,11 +38,12 @@ references its producing invocation. Approved objects are never overwritten.
 Extraction uses the importer’s logical keys for recognized Aurora artifacts
 (`feature:<name>`, `implementation:calculator:<name>`,
 `implementation:decision-policy`, and `model:<name>:<version>`). Other
-recognized artifacts use a stable kind-plus-relative-path identity. Before
-interpretation, the source commit and content hash are compared with evidence
-already stored for that key. Unchanged reruns create no object; a changed
-source creates one new version and preserves the old version. Duplicate logical
-keys in a single run are suppressed.
+recognized artifacts use a stable kind-plus-relative-path identity. Interpretation
+runs even when the importer already knows the same logical key. The interpreted
+structural attributes and cited fields are compared with the latest stored version:
+unchanged interpreted output creates no object, while changed interpretation creates
+one new version and preserves the old version. Duplicate logical keys in a single
+run are suppressed.
 
 The synthetic legacy estate is separate from Aurora Intelligence backfill. Its
 objects carry `synthetic=true` in storage and in retrieval packages, and runs

@@ -21,3 +21,14 @@ studio:
     model: deterministic
   extraction:
     interpreted-certainty: 0.72
+  discovery:
+    embedding-provider: deterministic
+    weights:
+      target-alignment: 0.20
+      population-alignment: 0.12
+      horizon-alignment: 0.10
+      feature-availability: 0.16
+      data-availability: 0.14
+      implementation-availability: 0.10
+      evidence-strength: 0.10
+      execution-evidence: 0.08

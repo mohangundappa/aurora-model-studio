@@ -7,6 +7,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -159,6 +160,66 @@ public class KnowledgeRepository {
     }
     sql += " order by knowledge_key,version desc";
     return jdbc.query(sql, this::map, parameters.toArray());
+  }
+
+  public List<KnowledgeObject> discoveryRecall(
+      float[] embedding,
+      String query,
+      String embeddingProvider,
+      boolean includeCandidates,
+      int limit) {
+    String status = includeCandidates ? "" : " and o.lifecycle_status='APPROVED'";
+    String vector = vectorLiteral(embedding);
+    LinkedHashSet<UUID> ids = new LinkedHashSet<>();
+    ids.addAll(
+        jdbc
+            .queryForList(
+                "select o.id from knowledge_objects o join knowledge_embeddings e on e.client_id=o.client_id and e.knowledge_object_id=o.id where o.client_id=?"
+                    + status
+                    + " and e.embedding_provider=?"
+                    + " order by e.embedding <=> ?::vector limit ?",
+                UUID.class,
+                ClientContext.require(),
+                embeddingProvider,
+                vector,
+                limit)
+            .stream()
+            .toList());
+    ids.addAll(
+        jdbc
+            .queryForList(
+                "select id from knowledge_objects o where client_id=?"
+                    + status
+                    + " and to_tsvector('simple', coalesce(name,'') || ' ' || coalesce(business_description,'') || ' ' || coalesce(canonical_taxonomy::text,'') || ' ' || coalesce(client_taxonomy::text,'') || ' ' || coalesce(attributes::text,'') || ' ' || coalesce(array_to_string(tags,' '),'')) @@ plainto_tsquery('simple', ?) limit ?",
+                UUID.class,
+                ClientContext.require(),
+                query,
+                limit)
+            .stream()
+            .toList());
+    return ids.stream().map(this::findById).flatMap(Optional::stream).toList();
+  }
+
+  public List<KnowledgeObject> allForEmbedding(boolean includeCandidates) {
+    return search(null, null, null, includeCandidates ? null : "APPROVED", null, null);
+  }
+
+  public void updateEmbedding(UUID objectId, float[] embedding, String provider) {
+    jdbc.update(
+        "insert into knowledge_embeddings(client_id,knowledge_object_id,embedding,embedding_provider) values(?,?,?::vector,?) on conflict (client_id,knowledge_object_id) do update set embedding=excluded.embedding,embedding_provider=excluded.embedding_provider",
+        ClientContext.require(),
+        objectId,
+        vectorLiteral(embedding),
+        provider);
+  }
+
+  private String vectorLiteral(float[] embedding) {
+    StringBuilder result = new StringBuilder("[");
+    for (int index = 0; index < embedding.length; index++) {
+      if (index > 0) result.append(',');
+      result.append(embedding[index]);
+    }
+    return result.append(']').toString();
   }
 
   public List<KnowledgeEvidence> evidence(UUID objectId) {

@@ -9,6 +9,22 @@ public class DeterministicLlmAdapter implements LlmAdapter {
   @Override
   public LlmAdapterResponse complete(LlmRequest request) {
     Map<String, Object> inputs = request.resolvedPromptInputs();
+    if (request.taskId().startsWith("discovery-explanation-")) {
+      Object explanation = inputs.get("deterministicExplanation");
+      if (explanation instanceof String text && !text.isBlank()) {
+        Map<String, Object> payload = Map.of("explanation", text);
+        return new LlmAdapterResponse(
+            LlmOutcome.OK,
+            payload,
+            null,
+            request.renderedPrompt().length() / 4,
+            payload.toString().length() / 4,
+            payload.toString().length() * 0.0000025,
+            false);
+      }
+      return new LlmAdapterResponse(
+          LlmOutcome.REFUSED, Map.of(), "missing deterministic explanation", 0, 0, 0, false);
+    }
     Object evidence = inputs.get("evidenceExcerpts");
     Object facts = inputs.get("structuralFacts");
     if (!(evidence instanceof List<?> excerpts)

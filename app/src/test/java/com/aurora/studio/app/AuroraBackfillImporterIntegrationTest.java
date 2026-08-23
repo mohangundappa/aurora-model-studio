@@ -33,7 +33,7 @@ class AuroraBackfillImporterIntegrationTest {
 
   @Container
   static final PostgreSQLContainer<?> POSTGRES =
-      new PostgreSQLContainer<>("postgres:16-alpine")
+      new PostgreSQLContainer<>("pgvector/pgvector:pg16")
           .withDatabaseName("aurora_studio")
           .withUsername("aurora")
           .withPassword("aurora");
@@ -133,7 +133,7 @@ class AuroraBackfillImporterIntegrationTest {
     try {
       ExtractionService.ExtractionRun first = extraction.extract(fixture, false);
       assertThat(first.counts()).containsEntry("EXPERIMENT", 1);
-      assertThat(first.candidateIds()).hasSize(1);
+      assertThat(first.candidateIds()).hasSize(4);
       assertThat(first.skippedArtifacts()).isGreaterThan(0);
 
       ExtractionService.ExtractionRun second = extraction.extract(fixture, false);
@@ -144,7 +144,10 @@ class AuroraBackfillImporterIntegrationTest {
       Path changed =
           fixture.resolve(
               "experiments/src/main/resources/experiments/destination-experience-v1.yaml");
-      Files.writeString(changed, Files.readString(changed) + "\nchanged: true\n");
+      Files.writeString(
+          changed,
+          Files.readString(changed)
+              .replace("name: destination-experience", "name: revised-experience"));
       ExtractionService.ExtractionRun third = extraction.extract(fixture, false);
       assertThat(third.counts()).containsEntry("EXPERIMENT", 1);
       assertThat(

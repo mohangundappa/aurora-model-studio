@@ -23,6 +23,7 @@
     <module>knowledge</module>
     <module>importer</module>
     <module>extraction</module>
+    <module>discovery</module>
     <module>app</module>
   </modules>
   <dependencyManagement>
