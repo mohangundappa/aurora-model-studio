@@ -606,13 +606,19 @@ public class InitiativeService {
                 "Draft a cohort and optional label query using only governed metadata."));
     if (!result.successful())
       throw new IllegalStateException("targeting generation failed: " + result.message());
+    LineageContext lineage = lineageContext(base.includeCandidates(), assets);
     List<GenerationDraft> drafts = new ArrayList<>();
     for (Object value : list(result.payload().get("drafts"))) {
       if (!(value instanceof Map<?, ?> raw)) continue;
       Map<String, Object> draft = map(raw);
       List<ValidatorVerdict> verdicts = new ArrayList<>();
       verdicts.addAll(
-          SqlDesignValidator.validateCohort(string(draft, "cohortSql"), requirement, assets));
+          SqlDesignValidator.validateCohort(
+              string(draft, "cohortSql"),
+              requirement,
+              assets,
+              lineage.objects(),
+              lineage.relationships()));
       String label = string(draft, "labelSql");
       if (!label.isBlank() && !requirement.requiredObservables().isEmpty()) {
         verdicts.addAll(SqlDesignValidator.validateLabel(label, requirement, assets));
@@ -628,6 +634,20 @@ public class InitiativeService {
     }
     return finishGeneratedStage(
         base, attempt, started, drafts, result.invocationId(), "Targeting design", false);
+  }
+
+  private LineageContext lineageContext(boolean includeCandidates, List<KnowledgeObject> assets) {
+    Map<UUID, KnowledgeObject> objects = new LinkedHashMap<>();
+    assets.forEach(asset -> objects.put(asset.id(), asset));
+    List<KnowledgeObject> visible =
+        knowledge.search(null, null, null, "APPROVED", null, null, includeCandidates);
+    if (visible != null) visible.forEach(object -> objects.put(object.id(), object));
+    List<KnowledgeRelationship> relationships = new ArrayList<>();
+    for (KnowledgeObject object : objects.values()) {
+      KnowledgePackage pack = knowledge.get(object.id(), includeCandidates);
+      if (pack != null) relationships.addAll(pack.relationships());
+    }
+    return new LineageContext(List.copyOf(objects.values()), relationships);
   }
 
   private Initiative finishFeature(
@@ -1089,6 +1109,9 @@ public class InitiativeService {
   }
 
   private record CheckResult(String status, String reason) {}
+
+  private record LineageContext(
+      List<KnowledgeObject> objects, List<KnowledgeRelationship> relationships) {}
 
   private KnowledgeObject findObservable(String observable, List<KnowledgeObject> visible) {
     String expected = observable.toLowerCase();

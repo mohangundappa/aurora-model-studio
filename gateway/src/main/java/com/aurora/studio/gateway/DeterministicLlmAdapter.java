@@ -13,17 +13,17 @@ public class DeterministicLlmAdapter implements LlmAdapter {
       Map<String, Object> rejected =
           Map.of(
               "cohortSql",
-              "SELECT session_id, event_time FROM raw_events WHERE event_name = 'BOOKING_COMPLETED' AND event_time <= :as_of",
+              "SELECT event_id, event_time FROM raw_events WHERE event_name = 'BOOKING_COMPLETED' AND event_time <= :as_of",
               "labelSql",
-              "SELECT session_id, CASE WHEN event_name = 'BOOKING_COMPLETED' THEN 1 ELSE 0 END AS label FROM raw_events WHERE event_time > :as_of AND event_time <= :as_of + interval '30 days'",
+              "SELECT event_id, CASE WHEN event_name = 'BOOKING_COMPLETED' THEN 1 ELSE 0 END AS label FROM raw_events WHERE event_time > :as_of AND event_time <= :as_of + interval '30 days'",
               "asOfSemantics",
               "Cohort features are available at the event_time as-of point.");
       Map<String, Object> accepted =
           Map.of(
               "cohortSql",
-              "SELECT session_id, event_time FROM raw_events WHERE event_time <= :as_of AND event_time > :as_of - interval '30 days'",
+              "SELECT event_id, event_time FROM raw_events WHERE event_time <= :as_of AND event_time > :as_of - interval '30 days'",
               "labelSql",
-              "SELECT session_id, CASE WHEN event_name = 'BOOKING_COMPLETED' THEN 1 ELSE 0 END AS label FROM raw_events WHERE event_time > :as_of AND event_time <= :as_of + interval '30 days'",
+              "SELECT event_id, CASE WHEN event_name = 'BOOKING_COMPLETED' THEN 1 ELSE 0 END AS label FROM raw_events WHERE event_time > :as_of AND event_time <= :as_of + interval '30 days'",
               "asOfSemantics",
               "Cohort features are available at the event_time as-of point.");
       Map<String, Object> payload = Map.of("drafts", List.of(rejected, accepted));

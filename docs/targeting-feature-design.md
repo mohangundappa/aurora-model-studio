@@ -18,6 +18,12 @@ query success. This is deterministic metadata validation, not an execution-based
 SQL verifier. If governed column metadata is absent, dependent checks remain
 `UNKNOWN`; columns are not inferred from application code or prose.
 
+Target leakage analysis only sees parsed references and governed lineage. Leakage
+through an ungoverned or undocumented derivation is invisible to this validator,
+and Model Studio does not claim to catch it. That explicit boundary is preferable
+to presenting metadata-only analysis as proof that every possible leakage path was
+checked.
+
 JSqlParser supports only the PostgreSQL `SELECT` subset required by this demo.
 It does not provide complete PostgreSQL dialect coverage. PostgreSQL constructs
 outside that supported subset may be rejected as unsupported or produce an

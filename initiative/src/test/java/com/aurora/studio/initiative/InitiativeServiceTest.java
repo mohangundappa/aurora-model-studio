@@ -1103,7 +1103,7 @@ class InitiativeServiceTest {
     Map<String, Object> attributes = new java.util.LinkedHashMap<>();
     attributes.put("observables", observables);
     attributes.put("grain", "one session per row");
-    attributes.put("primaryKey", "id");
+    attributes.put("primaryKey", "session_id");
     attributes.put("eventTime", "event_time");
     attributes.putAll(overrides);
     return new KnowledgeObject(
