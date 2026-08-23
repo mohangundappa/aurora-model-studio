@@ -156,7 +156,7 @@ public class InitiativeService {
             "batch",
             "prioritize outreach",
             Map.of("requiredFeatures", List.of("booking-intent"), "modelName", "booking-intent"),
-            Map.of("modelName", "booking-cancellation-prevention"),
+            Map.of(),
             Map.of(),
             List.of("BOOKING_COMPLETED"),
             false);
@@ -174,7 +174,7 @@ public class InitiativeService {
             "30d",
             "batch",
             "prioritize retention outreach",
-            Map.of(),
+            Map.of("modelName", "booking-cancellation-prevention"),
             Map.of(),
             Map.of(),
             List.of("BOOKING_CANCELLED"),
