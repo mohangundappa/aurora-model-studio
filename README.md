@@ -37,6 +37,7 @@ self-declared and unverified. Aurora Hotels is fictional.
 
 [Platform map](docs/model-studio-platform.md) explains the standalone Model Studio layers, lifecycle, interfaces, and external seams.
 [Layer mapping](docs/layer-mapping.md) maps each diagram box and lifecycle stage to its implementation or gap.
+[Agent boundary ADR](docs/adr/0001-agent-boundary.md) describes where AI agents fit and where verdicts stay deterministic.
 
 Aurora Intelligence is the separate runtime that turns events into signals,
 context, decisions, experiments, and measured value. The two products meet
