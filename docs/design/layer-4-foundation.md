@@ -1,5 +1,8 @@
 # Layer 4: Foundation
 
+_Foundational dependencies: nothing above works without them, and none of them
+decides anything. Read by every layer above._
+
 ## 1. Purpose
 
 The Foundation layer stores governed enterprise knowledge, evidence, provenance,

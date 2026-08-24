@@ -1,10 +1,13 @@
 # Layer 1: Governed orchestration
 
+_System of record._
+
 ## 1. Purpose
 
 The Governed Orchestration layer owns initiative state, stage order, attempts,
-human gates, events and duration accounting. It is not an autonomous planner,
-an execution engine, or an authenticated identity provider.
+human gates, events and duration accounting. Its deterministic orchestrator is
+deliberately never an agent. The layer is not an autonomous planner, an
+execution engine, or an authenticated identity provider.
 
 ## 2. Status
 
@@ -17,13 +20,14 @@ a standalone telemetry subsystem do not exist.
 | component | responsibility | implementing class/table | notes |
 | --- | --- | --- | --- |
 | Initiative API | Create, list, read and operate initiatives | `InitiativeController` | All routes are HTTP |
-| State machine | Dispatch runnable stages and enforce predecessors | `InitiativeService.runStage`, `InitiativeStage` | `CANDIDATE_BUILD` is skipped as `OUT_OF_SCOPE` |
+| Deterministic Orchestrator | Dispatch runnable stages and enforce predecessors | `InitiativeService.runStage`, `InitiativeStage`, `ClientScopeFilter` | Built and deliberately never an agent; request scoping and the self-approval guard are not authenticated authorisation; `CANDIDATE_BUILD` is skipped as `OUT_OF_SCOPE` |
 | Stage attempts | Persist status, blockers, checks, drafts and artifacts | `initiative_stage_attempts`, `StageAttempt` | Unique `(client_id, initiative_id, stage, attempt)` |
 | Human gates | Validate and append decisions | `InitiativeService.decide`, `initiative_gate_decisions` | Verbs are `APPROVE`, `REJECT`, `RETURN` |
 | Events | Record status transitions and actor/reason | `initiative_events`, `InitiativeEvent` | Database trigger makes records append-only |
 | Duration accounting | Separate machine work and human waiting | `DurationSummary` | Optional client baseline is caller-declared |
 | Guided autonomy | Stop at bounded producers and gates | `InitiativeService` | Partial; no advisor agent exists |
 | Telemetry | Expose timing and event history | `DurationSummary`, `initiative_events` | Partial; not a telemetry system |
+| Advisor Agent | Read state, diagnose a blocked stage and recommend recovery | TO BUILD | Read-only; cannot write state or choose the next stage |
 
 The stages are ordered in the enum as:
 
