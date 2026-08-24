@@ -154,6 +154,11 @@ sequenceDiagram
 `V17__approved_feature_sets.sql`:
 
 ```sql
+-- V17 first makes the existing gate decision key tenant-safe.
+alter table initiative_gate_decisions
+  add constraint initiative_gate_decisions_client_id_id_unique
+  unique (client_id, id);
+
 create table approved_feature_sets (
   id uuid primary key default gen_random_uuid(),
   client_id uuid not null,
@@ -175,6 +180,12 @@ create table approved_feature_sets (
     references initiative_stage_attempts(client_id, id)
 );
 
+-- The composite gate FK is added only after both its unique key and table exist.
+alter table approved_feature_sets
+  add constraint approved_feature_sets_gate_decision_fk
+  foreign key (client_id, approved_by_gate_decision_id)
+  references initiative_gate_decisions(client_id, id);
+
 create index approved_feature_sets_initiative_idx
   on approved_feature_sets(client_id, initiative_id, feature_set_version);
 
@@ -191,20 +202,8 @@ for each row execute function reject_approved_feature_set_mutation();
 ```
 
 `approved_by_gate_decision_id` is retained as an immutable audit reference.
-V17 must first add the missing client-scoped uniqueness required for a safe
-composite reference, then add the gate-decision foreign key:
-
-```sql
-alter table initiative_gate_decisions
-  add constraint initiative_gate_decisions_client_id_id_unique
-  unique (client_id, id);
-
-alter table approved_feature_sets
-  add constraint approved_feature_sets_gate_decision_fk
-  foreign key (client_id, approved_by_gate_decision_id)
-  references initiative_gate_decisions(client_id, id);
-```
-
+The V17 script explicitly adds the `(client_id, id)` unique constraint to
+`initiative_gate_decisions` before creating the composite gate foreign key.
 The approval service must also verify that the referenced decision belongs to
 the same initiative and stage attempt before inserting this row.
 

@@ -42,10 +42,15 @@ app/src/test/java/com/aurora/studio/app/console/
   ConsoleGateFlowTest.java
 ```
 
-`ConsoleApiClient` is a read client for `GET /api/initiatives/{id}` and a
-write adapter that submits JSON to the existing run and decision routes. The
-view controller must not depend on Python services or mutate
-`InitiativeService` state directly.
+`ConsoleApiClient` is a TO BUILD in-process port despite its route-shaped name.
+It calls the existing `InitiativeService` methods directly for the initiative
+read and both write operations; it must not issue a loopback HTTP request.
+The port preserves the exact request and response shapes of
+`GET /api/initiatives/{id}`, `POST /api/initiatives/{id}/stages/{stage}/run`
+and `POST /api/initiatives/{id}/stages/{stage}/decision`, so a future
+out-of-process console can replace the port without changing the server
+contract. The view controller must not depend on Python services or write
+workflow state through any other service.
 
 ## 3. Types
 
@@ -84,31 +89,49 @@ public record GateForm(
     List<String> acceptedUnknownChecks) {}
 
 public record RunForm(InitiativeStage stage) {}
+
+public interface ConsoleApiClient {
+    Initiative get(UUID clientId, UUID initiativeId);
+    Initiative run(UUID clientId, UUID initiativeId, InitiativeStage stage);
+    Initiative decide(
+        UUID clientId,
+        UUID initiativeId,
+        InitiativeStage stage,
+        GateDecisionRequest request);
+}
 ```
 
 `GateForm` maps exactly to the existing `GateDecisionRequest` fields:
 `decision`, `actor`, `reason` and `acceptedUnknownChecks`. The console must
 render the actual current `GateDecision` and `DurationSummary` values instead
-of re-deriving status.
+of re-deriving status. `ConsoleApiClient` receives the current client scope
+from `ClientContext` and passes it to the existing service/repository path; it
+must never fabricate, widen or replace that scope. The browser request carries
+the client scope through the existing `ClientScopeFilter`; the in-process call
+does not invoke that filter a second time and must preserve the already
+validated scope.
 
 ## 4. Behaviour
 
 The workspace flow is:
 
-1. `GET /ui/initiatives/{id}` calls the existing initiative read API through
-   `ConsoleApiClient`, maps `stages[].attempts[]`, and renders the timeline.
+1. `GET /ui/initiatives/{id}` obtains the current client scope established by
+   `ClientScopeFilter`, then calls `ConsoleApiClient.get` in-process. It maps
+   the same `stages[].attempts[]` response shape as the existing initiative
+   route and renders the timeline.
 2. Select the latest attempt by the same stage/attempt ordering as Java, then
    display its draft, structured verdicts, blockers, artifact IDs and machine
    versus human-wait duration.
 3. Render `UNKNOWN` checks as named unchecked items. For a gated feasibility
    approval, the actor must explicitly select every expected unknown check;
    the form must not silently submit an empty list.
-4. Submit a run action to
-   `POST /api/initiatives/{id}/stages/{stage}/run`. Do not optimistically
-   change the timeline; reload the GET projection after the response.
-5. Submit a gate action to
-   `POST /api/initiatives/{id}/stages/{stage}/decision` with JSON matching
-   `GateDecisionRequest`. Reload only after a successful response.
+4. Submit a run action with the exact request shape of
+   `POST /api/initiatives/{id}/stages/{stage}/run` to
+   `ConsoleApiClient.run` in-process. Do not optimistically change the
+   timeline; reload the GET projection after the response.
+5. Submit a gate action with JSON matching `GateDecisionRequest` to
+   `ConsoleApiClient.decide` in-process. Reload only after a successful
+   response.
 6. Display server error bodies, including 400, 404, 409 and 500, without
    changing local status. A concurrent run is shown as an error and requires
    an explicit reload or user action.
@@ -123,22 +146,22 @@ workflow store.
 sequenceDiagram
   actor U as "Developer or Data Scientist"
   participant C as "Server-rendered console"
-  participant I as "Initiative API"
+  participant S as "InitiativeService in process"
   U->>C: Open initiative workspace
-  C->>I: GET /api/initiatives/{id}
-  I-->>C: Timeline, attempts, drafts and verdicts
+  C->>S: get(client scope, initiative id)
+  S-->>C: Initiative response shape
   C-->>U: Render current stage and UNKNOWN checks
   alt Run stage
     U->>C: Submit run form
-    C->>I: POST /stages/{stage}/run
-    I-->>C: Updated initiative projection
+    C->>S: run(client scope, initiative id, stage)
+    S-->>C: Updated initiative projection
   else Decide gate
     U->>C: Submit actor, reason and accepted unknowns
-    C->>I: POST /stages/{stage}/decision
-    I-->>C: Updated initiative projection
+    C->>S: decide(client scope, initiative id, stage, request)
+    S-->>C: Updated initiative projection
   end
-  C->>I: GET /api/initiatives/{id}
-  I-->>C: Authoritative state after operation
+  C->>S: get(client scope, initiative id)
+  S-->>C: Authoritative state after operation
 ```
 
 ## 5. Schema
@@ -158,12 +181,17 @@ TO BUILD view routes:
 | `/ui/initiatives/{id}` | GET | Whole initiative workspace |
 | `/ui/initiatives/{id}/stages/{stage}` | GET | Focused stage detail |
 
-Existing write routes, which remain the only write paths:
+The existing public write routes remain unchanged and are the only write
+contracts:
 
 ```text
 POST /api/initiatives/{id}/stages/{stage}/run
 POST /api/initiatives/{id}/stages/{stage}/decision
 ```
+
+The server-rendered console invokes the corresponding service methods
+in-process rather than sending these requests over loopback HTTP. Its port
+uses the same request and response shapes as these routes.
 
 Decision JSON example:
 
@@ -192,8 +220,6 @@ Decision JSON example:
 | Property | Type | Default | Validation |
 | --- | --- | --- | --- |
 | `studio.console.enabled` | `boolean` | `false` | explicit enablement |
-| `studio.console.api-base-url` | `URI` | `http://localhost:8081` | valid URI |
-| `studio.console.request-timeout` | `Duration` | `PT10S` | positive |
 | `studio.console.template-prefix` | `String` | `console/` | non-blank |
 
 The console does not receive service tokens or client credentials in template
@@ -235,8 +261,10 @@ Spring MVC unit tests:
 - `workspaceRendersStageTimelineFromInitiativeResponse`.
 - `workspaceRendersAttemptsVerdictsAndDurations`.
 - `workspaceShowsUnknownChecksExplicitly`.
-- `workspacePostsRunOnlyToExistingRoute`.
-- `workspacePostsDecisionOnlyToExistingRoute`.
+- `workspaceMapsRunFormToExistingRunContract`.
+- `workspaceMapsGateFormToExistingDecisionContract`.
+- `consoleUsesInProcessInitiativeServiceWithoutLoopbackHttp`.
+- `consolePropagatesCurrentClientScopeWithoutWideningIt`.
 - `consoleCannotApproveWithoutActorAndReason`.
 - `consoleCannotSubmitMachineIdentityAsApproval`.
 - `consoleDoesNotChangeLocalStateAfterApiFailure`.
@@ -269,5 +297,6 @@ assert the serialized decision field names match `GateDecisionRequest`.
   Spring MVC and has no existing frontend build; add the missing dependency.
 - **Actor authentication:** recommendation: integrate deployment identity and
   map it to the API actor before enabling the console in production.
-- **API call shape:** recommendation: use same-origin calls with a small
-  progressive-enhancement script rather than adding a second write endpoint.
+- **Future extraction:** recommendation: retain the route-shaped
+  `ConsoleApiClient` port so an out-of-process console can replace the
+  in-process implementation without changing the two existing API contracts.

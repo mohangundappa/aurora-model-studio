@@ -68,7 +68,7 @@ is specified in the linked Layer 3 design.
 ```text
 initiative_gate_decisions(
   id, client_id, initiative_id, stage_attempt_id, stage, decision,
-  actor, actor_verified, reason, accepted_unknown_checks, created_at
+  actor, actor_verified, reason, created_at
 )
 ```
 
@@ -79,6 +79,8 @@ to the initiative and stage attempt. The
 The `initiative_gate_human_guard` trigger requires the
 `aurora.initiative_gate_actor` session setting to be `human` and rejects
 `actor_verified = true`.
+`V10__record_accepted_unknown_feasibility_checks.sql` later adds the
+`accepted_unknown_checks` JSONB column with an empty-array default.
 
 The Layer 3 feature-set approval records are proposed in
 [Layer 3 execution capabilities](layer-3-execution-capabilities.md). They

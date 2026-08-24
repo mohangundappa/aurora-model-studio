@@ -98,12 +98,14 @@ unknown feasibility.
 | `initiatives` | `id`, `client_id`, `requirement_id`, `include_candidates`, `client_baseline_duration_millis`, `created_at`; composite foreign key to `discovery_requirements` |
 | `initiative_stage_attempts` | `id`, `client_id`, `initiative_id`, `stage`, `attempt`, `status`, timestamps, machine and human-wait durations, JSONB blockers/checks/artifacts; unique client-scoped initiative/stage/attempt |
 | `initiative_events` | `id`, `client_id`, `initiative_id`, `stage`, `from_status`, `to_status`, `actor`, `reason`, `artifact_ids`, `at`; update and delete rejected |
-| `initiative_gate_decisions` | `id`, `client_id`, `initiative_id`, `stage_attempt_id`, `stage`, `decision`, `actor`, `actor_verified`, `reason`, `accepted_unknown_checks`, `created_at`; decision check constraint and append-only trigger |
+| `initiative_gate_decisions` | `id`, `client_id`, `initiative_id`, `stage_attempt_id`, `stage`, `decision`, `actor`, `actor_verified`, `reason`, `created_at`; decision check constraint and append-only trigger |
 
 `V7__mark_client_training_out_of_scope.sql` marks existing
 `CANDIDATE_BUILD` attempts `OUT_OF_SCOPE`. `V13__initiative_handoff_audit.sql`
 adds `initiative_handoff_packages` and `initiative_handoff_attempts`; V14 adds
 the insert-only trigger for handoff attempts.
+`V10__record_accepted_unknown_feasibility_checks.sql` later adds
+`accepted_unknown_checks` to `initiative_gate_decisions`.
 
 There is no HTTP idempotency-key contract for stage runs today. The unique
 client-scoped attempt key prevents duplicate attempt numbers under a race, but

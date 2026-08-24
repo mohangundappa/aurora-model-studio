@@ -147,6 +147,8 @@ requirements remain in Model Studio and compound there, not in the adapter.
 create table client_adapter_bindings (
   id uuid primary key default gen_random_uuid(),
   client_id uuid not null,
+  version integer not null check (version > 0),
+  supersedes_id uuid,
   adapter_type varchar(20) not null check (adapter_type in ('DATA', 'ML')),
   provider varchar(40) not null,
   binding_name varchar(160) not null,
@@ -160,11 +162,13 @@ create table client_adapter_bindings (
   capabilities jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
   unique (client_id, id),
-  unique (client_id, adapter_type, binding_name)
+  unique (client_id, adapter_type, binding_name, version),
+  foreign key (client_id, supersedes_id)
+    references client_adapter_bindings(client_id, id)
 );
 
 create index client_adapter_bindings_lookup_idx
-  on client_adapter_bindings(client_id, adapter_type, enabled);
+  on client_adapter_bindings(client_id, adapter_type, binding_name, version desc);
 
 create or replace function reject_client_adapter_binding_mutation()
 returns trigger language plpgsql as $$
@@ -178,9 +182,40 @@ before update or delete on client_adapter_bindings
 for each row execute function reject_client_adapter_binding_mutation();
 ```
 
-Binding rotation inserts a new binding and disables the old one through a
-future versioned replacement model; this migration does not permit mutation of
-an audit row. `credential_reference` is a reference name only, never a secret.
+The current binding is selected by the highest version for the client,
+adapter type and binding name:
+
+```sql
+select distinct on (client_id, adapter_type, binding_name) *
+from client_adapter_bindings
+where client_id = :client_id
+  and adapter_type = :adapter_type
+  and binding_name = :binding_name
+order by client_id, adapter_type, binding_name, version desc;
+```
+
+An implementation may use the equivalent scoped lookup below when resolving
+one binding:
+
+```sql
+select *
+from client_adapter_bindings
+where client_id = :client_id
+  and adapter_type = :adapter_type
+  and binding_name = :binding_name
+order by version desc
+limit 1;
+```
+
+Disabling, repointing or changing limits inserts a new version with
+`supersedes_id` set to the prior row and, for a disablement, `enabled = false`.
+On insert, the binding repository verifies that the superseded row has the
+same client, adapter type and binding name and that the new version is exactly
+one greater than the superseded version. No binding row is updated or deleted.
+V19 is intentionally versioned
+append-only because bindings are mutable configuration history; V17 approved
+feature sets and V18 execution attempts are immutable approval/audit records
+whose original values must never be replaced.
 
 ## 6. HTTP contract
 
@@ -249,6 +284,7 @@ Provider notes:
 | `ADAPTER-ROW-CAP` | No response contains more than the effective row cap. |
 | `ADAPTER-BYTE-CAP` | No response exceeds the effective byte cap. |
 | `ADAPTER-TIME-CAP` | Remote execution is cancelled at the effective timeout. |
+| `ADAPTER-VERSION-CHAIN` | A superseding row has the same scope and exactly the next version. |
 | `ADAPTER-ARTIFACT-HASH` | Registration requires content and approved feature-set hashes. |
 | `ADAPTER-REFUSE-NOT-FABRICATE` | Missing capability or provider failure produces refusal, never synthetic output. |
 
@@ -296,6 +332,7 @@ Testcontainers/repository tests on Java V19:
 - `ClientAdapterBindingAppendOnlyTriggerRejectsUpdateAndDelete`.
 - `DuplicateClientAdapterBindingNameIsRejected`.
 - `DisabledBindingCannotBeResolved`.
+- `SupersedingAdapterBindingWinsCurrentSelectionAndUpdateIsRejected`.
 
 ## 11. Acceptance criteria
 
