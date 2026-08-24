@@ -39,9 +39,12 @@ files under
 ```text
 Tool.java, ToolCall.java, ToolResult.java, ToolSuccess.java, ToolRefusal.java
 ToolRegistry.java, LoopBudget.java, LoopState.java, LoopOutcome.java
-LoopDefinition.java, LoopController.java, AttemptLedger.java
-AttemptLedgerRepository.java, EvidenceCitation.java
-EvidenceBoundValue.java, AgentPlatformProperties.java
+LoopDefinition.java, LoopController.java, DefaultLoopController.java
+LoopTermination.java, LoopStateSnapshot.java
+AttemptLedger.java, AttemptLedgerRepository.java
+AgentAttempt.java, ToolCallRecord.java
+EvidenceCitation.java, EvidenceBoundValue.java
+EvidenceCitationVerifier.java, AgentPlatformProperties.java
 ```
 
 Put `V15__agent_attempt_ledger.sql` and

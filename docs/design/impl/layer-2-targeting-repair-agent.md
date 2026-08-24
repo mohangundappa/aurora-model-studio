@@ -79,7 +79,7 @@ public record GovernedReference(
 the existing prose `ValidatorVerdict` alone. Its adapter maps the existing
 rule names unchanged: `parseable-single-read-only`, `explicit-projection`,
 `governed-references`, `output-contract`, `point-in-time-safety`,
-`target-leakage` and `label-horizon-agreement`.
+`target-leakage`, `label-output-contract` and `label-horizon-agreement`.
 
 ## 4. Behaviour
 
