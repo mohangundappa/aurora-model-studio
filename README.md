@@ -35,6 +35,8 @@ training, evaluation, deployment, serving, monitoring, and rollback of any
 real model version. Governance actors in this local showcase are
 self-declared and unverified. Aurora Hotels is fictional.
 
+[Platform map](docs/model-studio-platform.md) explains the standalone Model Studio layers, lifecycle, interfaces, and external seams.
+
 Aurora Intelligence is the separate runtime that turns events into signals,
 context, decisions, experiments, and measured value. The two products meet
 through the live HTTP handoff described in the
