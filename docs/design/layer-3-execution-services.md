@@ -127,8 +127,10 @@ any mismatch before touching client data.
 The current handoff precedent is `HandoffPackage.create`: recursively sort JSON
 object keys, preserve array order, serialise compact UTF-8 JSON, and compute a
 lowercase SHA-256. The approved feature set must use the same canonicalisation
-rule. Store the resulting hash beside the approved version and in every
-execution request. A mismatch is rejected as
+rule. Hash only the canonical feature-set content; transport envelope fields
+such as `initiativeId`, `idempotencyKey` and `contentHash` are excluded. Store
+the resulting hash beside the approved version and in every execution request.
+A mismatch is rejected as
 `FEATURE_SET_HASH_MISMATCH`; no training or feature build starts.
 
 ## 6. Main path
