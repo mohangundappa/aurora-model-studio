@@ -116,8 +116,11 @@ Blocked until the execution layer exists:
 The first slice is the repair-loop agent: draft, run the validators, feed the
 verdicts back, redraft within a fixed attempt budget, persist every attempt. It
 is the only agent whose judging environment is already built, and it is the piece
-that makes generation demonstrable rather than asserted, because the existing
-targeting path can reject a provider draft on its first attempt.
+that makes generation demonstrable rather than asserted. This is not a
+theoretical gap: in observed runs against a real provider, targeting design was
+rejected on the first attempt every time, so without a repair loop the stage ends
+`BLOCKED` and nothing downstream runs. The verdicts that rejected it are exactly
+the feedback a repair loop would consume.
 
 ### Technology
 
