@@ -5,6 +5,8 @@ the missing parts should be built. Read [the platform map](../model-studio-platf
 for the overall shape, [the layer mapping](../layer-mapping.md) for the terse
 box lookup, and [the agent boundary ADR](../adr/0001-agent-boundary.md) for the
 governance rule.
+For implementation-ready Java-side specifications, read the
+[implementation specifications](impl/README.md).
 
 The structural rule from the architecture diagram is:
 
