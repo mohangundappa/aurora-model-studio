@@ -1,12 +1,15 @@
 # Layer 0: Experience
 
+_Conversational, not a form._
+
 ## 1. Purpose
 
 The Experience layer will give a model developer or data scientist one
-business-facing Model Development Assistant workspace. It is responsible for
-showing initiative progress, the current draft, deterministic verdicts and the
-human gate action; it is not responsible for workflow state, validation,
-approvals or client data execution.
+business-facing Model Development Assistant workspace. It interprets the
+requirement in business language, names what it does not know, and asks rather
+than assumes. It is responsible for showing initiative progress, the current
+draft, deterministic verdicts and the human gate action; it is not responsible
+for workflow state, validation, approvals or client data execution.
 
 ## 2. Status
 

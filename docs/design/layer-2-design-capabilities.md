@@ -1,5 +1,8 @@
 # Layer 2: Design capabilities
 
+_Agent proposes, deterministic judge decides, human approves. Over governed
+knowledge._
+
 ## 1. Purpose
 
 The Design Capabilities layer recalls governed knowledge, analyses reuse,
@@ -14,14 +17,24 @@ four application call sites exist. No bounded repair-loop agent exists.
 
 ## 3. Components
 
+The diagram's six agent/judge pairs map to the following current producers and
+validators. Agent rows describe the designed bounded loop; judge rows identify
+the built deterministic work where it exists.
+
 | component | responsibility | implementing class/table | notes |
 | --- | --- | --- | --- |
-| Model Discovery | Register requirements, recall and rank governed candidates, explain results | `DiscoveryService`, `DiscoveryController`, `discovery_runs` | `POST /api/discovery/runs`; recall uses `EmbeddingProvider` |
-| Reuse Intelligence | Score and classify reuse, adapt or generate | `DiscoveryService`, `DiscoveryWeights` | `POST /api/discovery/runs`; six gated dimensions must each reach `REUSE_THRESHOLD` `0.80` |
-| Data Discovery | Resolve governed data assets and assess feasibility | `InitiativeService.finishFeasibility`, `KnowledgeService` | `POST /api/initiatives/{id}/stages/DATA_FEASIBILITY/run`; metadata only |
-| Targeting Design | Draft cohort and optional label SQL | `InitiativeService`, `SqlDesignValidator` | `POST /api/initiatives/{id}/stages/TARGETING_DESIGN/run`; deterministic validators decide |
-| Feature Intelligence | Draft features and check source, leakage, time and reuse | `InitiativeService.featureVerdicts` | `POST /api/initiatives/{id}/stages/FEATURE_DESIGN/run`; deterministic validation |
-| Experiment Design | Validate variants, compute sample size and produce a decision rule | `InitiativeService.finishExperiment` | `POST /api/initiatives/{id}/stages/EXPERIMENT_DESIGN/run`; planning only |
+| Discovery Agent | Interprets the requirement, spots missing information, asks for clarification, compares candidates | TO BUILD; current one-shot path is `DiscoveryService` | `DiscoveryService.explanation` is the existing LLM call |
+| Similarity, eligibility, access control | Decide candidate recall and eligibility | `DiscoveryService`, `EmbeddingProvider`, `discovery_runs` | `POST /api/discovery/runs`; recall is deterministic/provider-selected, not a bounded agent; no separate LLM call |
+| Reuse Evidence Agent | Establishes each dimension's evidence, names the gaps, argues reuse vs rebuild | TO BUILD; current score path is `DiscoveryService` | No current LLM call; evidence enforcement remains policy, not a current agent loop |
+| Six-dimension scorecard · 0.80 threshold | Decide reuse dimensions and outcome | `DiscoveryService`, `DiscoveryWeights`, `REUSE_THRESHOLD` | `targetAlignment`, `populationAlignment`, `horizonAlignment`, `featureAvailability`, `dataAvailability`, `implementationAvailability` |
+| Data Profiling Agent | Explores the catalog, profiles grain, history and nulls, resolves UNKNOWNs, proposes joins | TO BUILD; current path is `InitiativeService.finishFeasibility` | No current LLM call; metadata-only today and blocked on Layer 3 for live observation |
+| Access permission · query limits · quality thresholds | Decide declared data-asset feasibility | `InitiativeService.finishFeasibility`, `KnowledgeService` | `POST /api/initiatives/{id}/stages/DATA_FEASIBILITY/run`; no warehouse query path |
+| Targeting Repair Agent | Drafts, reads the verdicts, repairs, retries within a bounded budget — every attempt kept | TO BUILD; current path is `InitiativeService.finishTargeting` | `InitiativeService.finishTargeting` is the LLM call; `SqlDesignValidator` is called by the one-shot producer |
+| SQL safety · governed references · point-in-time | Decide cohort and label SQL validity | `SqlDesignValidator` | Read-only, governed-reference, required-projection, leakage and time checks |
+| Feature Agent | Searches the governed catalog, detects duplicates, generates and refines hypotheses | TO BUILD; current path is `InitiativeService.finishFeature` | `InitiativeService.finishFeature` is the LLM call; current feature draft is one-shot |
+| Leakage rules · point-in-time correctness | Decide feature safety and reuse | `InitiativeService.featureVerdicts` | Checks source columns, target leakage, observation window and `pointInTimeAvailable` |
+| Experiment Planning Agent | Proposes experiments and a candidate algorithm set, recommends the next experiment | TO BUILD; current path is `InitiativeService.finishExperiment` | No current LLM call; planning only, with execution and evaluation blocked on Layer 3 |
+| Sample size · statistical tests · promotion criteria | Decide experiment mathematics and later deterministic controls | `InitiativeService.finishExperiment` | Sample-size and decision-rule mathematics exist; statistical tests and promotion are future controls |
 | Bounded capability loop | Gather evidence, call judges, read verdicts and retry | TO BUILD | Every attempt must be persisted |
 
 The four application call sites of `LlmGateway.complete` are
@@ -38,7 +51,9 @@ Current HTTP routes:
 POST /api/discovery/requirements
 POST /api/discovery/runs
 GET  /api/discovery/runs/{id}
-POST /api/initiatives/{id}/stages/{TARGETING_DESIGN|FEATURE_DESIGN|EXPERIMENT_DESIGN}/run
+POST /api/initiatives/{id}/stages/TARGETING_DESIGN/run
+POST /api/initiatives/{id}/stages/FEATURE_DESIGN/run
+POST /api/initiatives/{id}/stages/EXPERIMENT_DESIGN/run
 ```
 
 Discovery requirement shape is `ModelRequirement`:

@@ -1,11 +1,11 @@
-# Layer 2b: Agent platform
+# Cross-cutting: Agent platform (rail across layers 2 and 3)
 
 ## 1. Purpose
 
-The Agent Platform is shared infrastructure for structured model calls,
-embeddings, tools, bounded loops and evidence accounting. It is not a pipeline
-stage, an orchestrator of record, a provider-specific application, or a
-replacement for deterministic validators.
+The Agent Platform is shared infrastructure every agent in Layers 2 and 3
+calls for structured model calls, embeddings, tools, bounded loops and evidence
+accounting. It is not a layer or a pipeline stage, an orchestrator of record, a
+provider-specific application, or a replacement for deterministic validators.
 
 ## 2. Status
 

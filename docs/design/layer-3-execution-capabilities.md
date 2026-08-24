@@ -1,12 +1,15 @@
-# Layer 3: Controlled execution services
+# Layer 3: Execution capabilities
+
+_Python · the only place client data is touched. Agent proposes, deterministic
+judge decides, human approves._
 
 ## 1. Purpose
 
-Controlled Execution Services will be the only layer that touches client data
-rows or runs model-build workloads: one service executes data and feature work,
-and one trains and evaluates models. They are not knowledge owners,
-orchestrators of record, approval authorities, or places where thresholds and
-promotion policy are improvised by an agent.
+Execution capabilities will be the only layer that touches client data rows or
+runs model-build workloads: one agent/judge pair executes data and feature
+work, and one agent/judge pair trains and evaluates models. They are not
+knowledge owners, orchestrators of record, approval authorities, or places
+where thresholds and promotion policy are improvised by an agent.
 
 ## 2. Status
 
@@ -15,13 +18,16 @@ exists in this repository. The contracts below are implementation proposals.
 
 ## 3. Components
 
+The two execution pairs and the approval transition are:
+
 | component | responsibility | implementing class/table | notes |
 | --- | --- | --- | --- |
-| Data & Feature Agent | Profile data, propose features, refine candidates within a bounded loop | TO BUILD | Operates only after an approved design and permissions |
-| Data & Feature Judge | Execute cohorts, build features, and check safety and quality | TO BUILD | Deterministic side owns access and limits |
-| ML Build & Evaluation Agent | Propose algorithms, train, tune and explain runs | TO BUILD | Trains only the approved feature-set hash |
-| ML Judge | Run training and evaluation and apply acceptance and promotion rules | TO BUILD | Deterministic metrics and gates |
-| Feature-set approval | Approve an exact versioned feature set | TO BUILD | Hash binding makes approval meaningful |
+| Data & Feature Agent | Profiles the data, proposes the feature set for the requirement, engineers candidates, reads the verdicts and refines | TO BUILD | Bounded loop; every attempt is kept |
+| Deterministic execution & judgement | Cohort queries, feature build, leakage, point-in-time correctness, availability and quality thresholds | TO BUILD | Owns permissions and query limits |
+| Approved feature set only | Bind ML execution to the exact human-approved version and hash | TO BUILD | No training starts after a hash mismatch |
+| ML Build & Evaluation Agent | Trains and tunes on the approved feature set only, proposes candidate algorithms, explains and compares runs | TO BUILD | No trained candidate exists in this repository |
+| Deterministic execution & judgement | Training runs, evaluation metrics, acceptance thresholds, promotion criteria and model artifacts | TO BUILD | Agent cannot change metrics or promotion policy |
+| Feature-set approval | Approve an exact versioned feature set between the two pairs | TO BUILD | Cross-cutting human gate; see [the human-gate design](cross-cutting-human-gate.md) |
 | Python HTTP seam | Authenticate calls, carry idempotency and content hashes | TO BUILD | Append-only attempt records on both sides |
 
 ## 4. Interfaces
@@ -180,7 +186,7 @@ binding, a later feature substitution would make the approval decorative.
 - A repeated idempotency key returns the append-only original attempt.
 - Agent budget exhaustion returns unresolved work for human review.
 - Training, evaluation or artifact failure remains a failed attempt; it cannot
-  produce a `TESTED` or promoted model status by implication.
+  produce a tested or promoted model status by implication.
 
 ## 9. Tech stack
 
