@@ -1,5 +1,7 @@
 # Aurora Model Studio platform map
 
+[See the box-by-box layer mapping](layer-mapping.md) for the terse implementation and gap lookup.
+
 This document is the platform map for Aurora Model Studio. It uses the same
 layer names and lifecycle vocabulary as the conceptual model, but every
 implementation statement below is grounded in this repository.
