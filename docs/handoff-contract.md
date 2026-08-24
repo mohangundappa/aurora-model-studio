@@ -12,11 +12,15 @@ POST /api/models/{name}/candidates
   Idempotency-Key: <packageHash>
   { studioInitiativeId, requirementId, packageHash, modelName, targeting,
     features, dataAssets, experimentDesign, feasibility, evidence,
-    declaredObservables, notIncluded }
+    declaredObservables, notIncluded, clientId }
 → 201 { candidateId, status: "AWAITING_WEIGHTS" }
 ```
 
-Candidate writes with a missing or incorrect `X-Aurora-Studio-Token` return
+The `clientId` field is the originating Model Studio client ID, carried as
+provenance. Aurora records and returns it with the candidate; it is not a
+claim of tenant isolation in Aurora's single-brand showcase deployment.
+Candidate reads and writes with a missing or incorrect
+`X-Aurora-Studio-Token` return
 `401 {"error": ...}`. If Aurora has no token configured, it fails closed with
 `503 {"error": ...}`. Malformed request JSON returns
 `400 {"error":"request body must be valid JSON"}`. The responses never reveal
@@ -25,9 +29,19 @@ provider responses as `AURORA_REJECTED`, preserving the HTTP status in the
 attempt record; a missing local outbound token is instead
 `AURORA_NOT_CONFIGURED` and no anonymous request is made.
 
+The authenticated read is:
+
+```text
+GET /api/models/{name}/candidates
+  X-Aurora-Studio-Token: <shared token>
+→ 200 [ { candidateId, modelName, packageHash, studioInitiativeId,
+          clientId, status, packageContent, createdAt } ]
+```
+
 The package is immutable, deterministically serialized, SHA-256 hashed, and
 uses that hash as the idempotency key. The hash covers the package fields
-except the transport envelope fields `studioInitiativeId` and `packageHash`;
+including provenance, except the transport envelope fields `studioInitiativeId`
+and `packageHash`;
 maps are recursively key-sorted, arrays retain order, and Jackson's compact
 UTF-8 JSON writer is used. Aurora repeats those exact steps before insertion.
 Aurora candidates are not model
@@ -38,8 +52,12 @@ Model Studio records every outbound attempt and contains transport or remote
 failures without creating a local registration. The Aurora receiving endpoint
 belongs to a separate repository and review.
 
-`HANDOFF` approval requires a named human actor and a non-empty reason; agent
-identities, including the orchestrator, cannot approve. Knowledge approval
+`HANDOFF` approval requires a named human actor and a non-empty reason. The
+exact governed machine-identity check is a self-approval guard: it prevents the
+known orchestrator identity from rubber-stamping the human gate it created, but
+does not verify that arbitrary caller-supplied names are human. The approver
+identity is caller-asserted and unverified (`actorIdentityVerified:false` is
+disclosed in the API), so a caller may supply any name. Knowledge approval
 likewise requires an explicit named actor—there is no anonymous default.
 
 `HttpAuroraCandidateClient` has a Java-level default of

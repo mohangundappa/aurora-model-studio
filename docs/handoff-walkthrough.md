@@ -47,7 +47,7 @@ extra_hosts:
 The default favors the topology used here: Model Studio in Compose and Aurora
 on the host. Set `STUDIO_HANDOFF_AURORA_BASE_URL` when both services run in a
 different network topology. The demo token must match Aurora's
-`AURORA_CANDIDATES_STUDIO_TOKEN`; it protects the candidate write seam only.
+`AURORA_CANDIDATES_STUDIO_TOKEN`; it protects the candidate read and write seam.
 
 Set the API variables and confirm the application:
 
@@ -322,10 +322,12 @@ initiative so older demo candidates in a persistent Aurora database do not
 obscure the result:
 
 ```bash
-curl -sS http://localhost:8080/api/models/booking-intent/candidates |
+curl -sS \
+  -H "X-Aurora-Studio-Token: aurora-model-studio-demo-token" \
+  http://localhost:8080/api/models/booking-intent/candidates |
   jq --arg id "$REUSE_ID" \
     'map(select(.studioInitiativeId==$id) |
-      {candidateId,modelName,packageHash,studioInitiativeId,status,
+      {candidateId,modelName,packageHash,studioInitiativeId,clientId,status,
        requirementId:.packageContent.requirementId,
        notIncluded:.packageContent.notIncluded})'
 ```
@@ -350,6 +352,13 @@ Observed output:
   }
 ]
 ```
+
+Each rehearsal adds a permanent candidate in Aurora. The Model Studio reset
+does not clear Aurora candidates; filtering by `studioInitiativeId` above keeps
+the projected view focused on this rehearsal. For a fully clean live run,
+reset Aurora explicitly with `docker compose down -v`, start its documented
+Compose stack again, and run `./scripts/seed-demo.sh --reset` before resetting
+Model Studio.
 
 Show the existing model versions immediately beside it:
 

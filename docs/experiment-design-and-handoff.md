@@ -24,9 +24,10 @@ conflicts. Generated `EXTRACTED` feature candidates and the live
 loyalty-tenure conflict therefore block the handoff.
 
 Approval is explicit human governance: an `APPROVE` decision requires a named
-human actor and a non-empty reason. Agent identities, including the initiative
-orchestrator, are refused. Knowledge approval also requires an explicit actor;
-the API does not substitute an anonymous demo actor.
+human actor and a non-empty reason. The governed orchestrator identity is refused
+as a self-approval guard; caller-supplied actor names remain unverified. Knowledge
+approval also requires an explicit actor; the API does not substitute an anonymous
+demo actor.
 
 An approved handoff transfers an immutable, content-hashed design package to
 Aurora using:
