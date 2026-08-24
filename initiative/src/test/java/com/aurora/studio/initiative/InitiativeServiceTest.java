@@ -10,6 +10,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.aurora.studio.common.ClientContext;
 import com.aurora.studio.common.KnowledgeType;
 import com.aurora.studio.common.RelationshipType;
 import com.aurora.studio.common.ValidationException;
@@ -30,11 +31,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
 
 class InitiativeServiceTest {
+  private static final UUID CLIENT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
   private final InitiativeRepository repository =
       org.mockito.Mockito.mock(InitiativeRepository.class);
   private final DiscoveryService discovery = org.mockito.Mockito.mock(DiscoveryService.class);
@@ -44,6 +48,16 @@ class InitiativeServiceTest {
       new InitiativeService(repository, discovery, knowledge, gateway);
   private final UUID initiativeId = UUID.randomUUID();
   private final UUID attemptId = UUID.randomUUID();
+
+  @BeforeEach
+  void setClientContext() {
+    ClientContext.set(CLIENT_ID);
+  }
+
+  @AfterEach
+  void clearClientContext() {
+    ClientContext.clear();
+  }
 
   @Test
   void orchestrationAwaitsHumanGateWithoutWritingDecision() {
@@ -311,7 +325,7 @@ class InitiativeServiceTest {
                     new GateDecisionRequest(
                         "APPROVE", "  INITIATIVE-ORCHESTRATOR  ", "Approve the governed design")))
         .isInstanceOf(ValidationException.class)
-        .hasMessage("agent identities cannot approve human-gated stages");
+        .hasMessage("known machine identities cannot approve human-gated stages they created");
   }
 
   @Test
@@ -1456,6 +1470,7 @@ class InitiativeServiceTest {
     ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
     verify(client).register(eq("booking-intent"), payload.capture(), eq(approved.hash()));
     assertThat(payload.getValue()).containsEntry("packageHash", approved.hash());
+    assertThat(payload.getValue()).containsEntry("clientId", CLIENT_ID.toString());
     assertThat(payload.getValue()).containsEntry("requirementId", base.requirementId().toString());
     assertThat(payload.getValue().get("targeting")).isEqualTo(approved.content().get("targeting"));
     verify(repository, never()).savePackage(any(), any(), any());

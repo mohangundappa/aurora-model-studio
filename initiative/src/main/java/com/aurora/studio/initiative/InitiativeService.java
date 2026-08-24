@@ -1,5 +1,6 @@
 package com.aurora.studio.initiative;
 
+import com.aurora.studio.common.ClientContext;
 import com.aurora.studio.common.RelationshipType;
 import com.aurora.studio.common.ResourceNotFoundException;
 import com.aurora.studio.common.ValidationException;
@@ -325,8 +326,9 @@ public class InitiativeService {
     }
     validateGateText("actor", request.actor());
     if (request.reason() != null) validateGateText("reason", request.reason());
-    if (InitiativeActors.isMachineIdentity(request.actor())) {
-      throw new ValidationException("agent identities cannot approve human-gated stages");
+    if (InitiativeActors.isGovernedMachineIdentity(request.actor())) {
+      throw new ValidationException(
+          "known machine identities cannot approve human-gated stages they created");
     }
     String decision = request.decision() == null ? "" : request.decision().trim().toUpperCase();
     if (!Set.of("APPROVE", "REJECT", "RETURN").contains(decision)) {
@@ -1186,6 +1188,7 @@ public class InitiativeService {
                 .toList()));
     content.put("evidence", evidence);
     content.put("notIncluded", List.of("trained model", "weights", "evaluation", "expected lift"));
+    content.put("clientId", ClientContext.require().toString());
     return HandoffPackage.create(mapper, content);
   }
 

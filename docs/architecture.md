@@ -243,7 +243,7 @@ Only `APPROVED` knowledge is trusted by default. Candidate retrieval requires
 `includeCandidates=true`; the same opt-in is carried by discovery and initiatives.
 The unique approved-per-client-and-key index prevents two approved versions at once.
 
-Database-level enforcement is provided by Flyway migrations `V1` through `V13`:
+Database-level enforcement is provided by Flyway migrations `V1` through `V14`:
 
 - `knowledge_audit` is append-only through `knowledge_audit_append_only`, and
   `llm_invocations` is append-only through `llm_invocations_append_only`.
@@ -251,6 +251,7 @@ Database-level enforcement is provided by Flyway migrations `V1` through `V13`:
   database triggers.
 - `initiative_events` and `initiative_gate_decisions` are append-only through their
   database triggers.
+- `initiative_handoff_attempts` is insert-only through its database trigger.
 - Approved `knowledge_objects` cannot be edited in place; the
   `knowledge_approved_guard` permits only `SUPERSEDED` or `DEPRECATED` lifecycle
   transitions while protecting approved content.
@@ -260,7 +261,11 @@ Database-level enforcement is provided by Flyway migrations `V1` through `V13`:
 The human-gate trigger trusts the `aurora.initiative_gate_actor` session variable
 that the API sets immediately before inserting a decision. This protects against
 accidental machine writes through the normal path; it is not protection against an
-adversary who can write to the database and set that variable.
+adversary who can write to the database and set that variable. The approver identity
+is caller-asserted and unverified (`actorIdentityVerified:false` is disclosed in the
+API), so a caller may supply any name. The exact governed machine-identity check is
+only a self-approval guard against the orchestrator's own identity rubber-stamping a
+human gate it created; it does not verify arbitrary human identity.
 
 ## Level 5 — where AI stops and gates begin
 
