@@ -82,3 +82,5 @@ implements it, or to the explicit gap where no component exists.
 - Client data-platform and client ML-platform adapters.
 - Model build, evaluation, and trained-candidate approval.
 - Authenticated actor identity and a standalone telemetry system.
+
+[Agent boundary ADR](adr/0001-agent-boundary.md) describes where AI agents fit and where verdicts stay deterministic.
