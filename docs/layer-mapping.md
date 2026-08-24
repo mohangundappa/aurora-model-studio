@@ -3,6 +3,8 @@
 This is a lookup from each diagram box to the Model Studio component that
 implements it, or to the explicit gap where no component exists.
 
+[See the detailed layer designs](design/README.md) for implementation contracts and audit detail.
+
 ## Experience layer
 
 | Diagram element | Status | Implementing component | Note |
