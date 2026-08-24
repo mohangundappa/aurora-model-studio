@@ -33,10 +33,9 @@ String featureSetHash;
 ```
 
 Do not add these fields to current gates unless the stage requires a feature
-set. The Python-side handoff owns V17:
-`V17__approved_feature_sets.sql` is reserved and must define the immutable
-feature-set table and its client-scoped links. This document specifies the
-cross-service contract only.
+set. `V17__approved_feature_sets.sql` is defined in the Python-side handoff;
+this document specifies the cross-service contract and links to its
+authoritative DDL.
 
 ## 3. Types
 
@@ -84,11 +83,11 @@ compute lowercase SHA-256. The transport envelope is not part of the content:
    sorting and exact equality. An `APPROVE` with UNKNOWN checks still requires
    every expected check name; a feature-set hash never substitutes for that
    list.
-6. Insert the gate decision with the binding fields in V17's linked decision
-   record. Set `aurora.initiative_gate_actor` to `human` in the same
-   transaction; the existing trigger rejects direct inserts and
-   `actor_verified=true`.
-7. Only after the decision is committed may the execution handoff read the
+6. Insert the gate decision, then insert the V17 approved-feature-set row
+   linked by its immutable gate-decision audit reference. Set
+   `aurora.initiative_gate_actor` to `human` in the same transaction; the
+   existing trigger rejects direct inserts and `actor_verified=true`.
+7. Only after both records are committed may the execution handoff read the
    approved binding. The Java orchestrator still owns stage transitions.
 
 ### Execution verification
@@ -104,21 +103,8 @@ compute lowercase SHA-256. The transport envelope is not part of the content:
 
 ## 5. Schema
 
-V17 is reserved; no DDL is defined in this Java-side handoff. Its minimum
-contract is:
-
-```text
-approved_feature_sets:
-  id, client_id, initiative_id, version, canonical_content, content_hash,
-  created_at
-```
-
-It must have unique `(client_id, id)`, unique
-`(client_id, initiative_id, version)`, a lowercase SHA-256 format check,
-composite foreign keys to `initiatives`, and a before-update/delete append-only
-trigger modelled on `reject_initiative_append_only`. Gate records must carry a
-client-scoped foreign key to the exact approved set/version. The Python
-handoff defines the final table and migration.
+The authoritative V17 DDL is in `java-python-seam.md`, alongside V18, because
+the approved set is the payload boundary consumed by both Python services.
 
 ## 6. HTTP contract
 
@@ -246,7 +232,8 @@ a second hashing implementation.
   access.
 - [ ] `acceptedUnknownChecks` remains independently exact.
 - [ ] Existing actor and human-session guards remain active.
-- [ ] V17 is implemented only in the Python-side handoff.
+- [ ] V17 is introduced only by this Python-side handoff; no earlier
+      migration is changed.
 
 ## 12. Open decisions
 
