@@ -1,6 +1,7 @@
 # Aurora Model Studio architecture
 
 [See the standalone platform map](model-studio-platform.md) for the layered product view; this document remains the code-level architecture view.
+[See the detailed layer designs](design/README.md) for implementation contracts and audit detail.
 
 Aurora Model Studio is the design and governance plane for customer-intelligence
 artifacts. It imports and interprets source material, retrieves governed knowledge,
