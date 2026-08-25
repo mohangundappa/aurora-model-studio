@@ -66,37 +66,149 @@ internal, authenticated, read-mostly workspace with no SSR or SEO requirement.
 
 ## 3. Types
 
+### Wire types
+
 ```ts
-export interface Initiative {
+export interface ModelRequirement {
+  businessDomain: string;
+  businessUseCase: string;
+  predictionTarget: string;
+  observableDefinition: string;
+  population: string;
+  outcomeHorizon: string;
+  decisionLatency: string;
+  requiredAction: string;
+  constraints: Record<string, unknown>;
+  clientTaxonomy: Record<string, unknown>;
+  canonicalTaxonomy: Record<string, unknown>;
+  requiredObservables: string[];
+  syntheticEvidenceAllowed: boolean;
+}
+
+export interface ArtifactReference {
+  type: string;
   id: string;
-  requirementId: string;
-  requirementSummary: string;
-  stages: StageView[];
-  currentStage: StageView | null;
-  globalErrors: string[];
+  synthetic: boolean;
 }
 
-export interface StageView {
-  stage: string;
+export interface ValidatorVerdict {
+  name: string;
   status: string;
-  attempts: AttemptView[];
-  blockers: string[];
-  unknownChecks: FeasibilityCheckView[];
-  canRun: boolean;
-  canDecide: boolean;
+  reason: string;
 }
 
-export interface AttemptView {
+export interface FeasibilityCheck {
+  name: string;
+  status: string;
+  artifactId: string | null;
+  reason: string;
+}
+
+export interface HandoffAttempt {
+  id: string;
+  packageHash: string;
+  endpoint: string;
+  requestSummary: Record<string, unknown>;
+  responseStatus: number | null;
+  candidateId: string | null;
+  candidateStatus: string | null;
+  outcome: string;
+  failureCode: string | null;
+  failureMessage: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface GenerationDraft {
+  kind: string;
+  payload: Record<string, unknown>;
+  outcome: string;
+  invocationId: string | null;
+  validatorVerdicts: ValidatorVerdict[];
+}
+
+export interface StageAttempt {
   id: string;
   attempt: number;
   status: string;
   startedAt: string;
   completedAt: string | null;
-  duration: DurationSummary | null;
-  draft: unknown | null;
-  verdicts: ValidatorVerdict[];
-  artifactIds: string[];
+  machineDurationMillis: number;
+  humanWaitDurationMillis: number;
+  blockers: string[];
+  feasibilityChecks: FeasibilityCheck[];
+  artifacts: ArtifactReference[];
+  drafts: GenerationDraft[];
+  draftsGenerated: number;
+  draftsRejected: number;
+  violatedChecks: string[];
+  handoffAttempts: HandoffAttempt[];
 }
+
+export interface StageState {
+  stage: string;
+  status: string;
+  currentAttempt: number;
+  attempts: StageAttempt[];
+  note: string | null;
+}
+
+export interface DurationSummary {
+  machineDurationMillis: number;
+  humanWaitDurationMillis: number;
+  clientBaselineDurationMillis: number | null;
+  deliveryTimeReductionMillis: number | null;
+  comparisonClientDeclared: boolean;
+  comparisonNote: string | null;
+}
+
+export interface GateDecision {
+  id: string;
+  stage: string;
+  stageAttemptId: string;
+  decision: string;
+  actor: string;
+  actorVerified: boolean;
+  reason: string;
+  acceptedUnknownChecks: string[];
+  createdAt: string;
+}
+
+export interface InitiativeEvent {
+  id: number;
+  stage: string;
+  fromStatus: string;
+  toStatus: string;
+  actor: string;
+  reason: string;
+  artifacts: ArtifactReference[];
+  at: string;
+}
+
+export interface Initiative {
+  id: string;
+  requirementId: string;
+  requirement: ModelRequirement;
+  status: string;
+  includeCandidates: boolean;
+  actorIdentityVerified: boolean;
+  createdAt: string;
+  stages: StageState[];
+  artifacts: ArtifactReference[];
+  blockers: string[];
+  gateDecisions: GateDecision[];
+  durations: DurationSummary;
+  events: InitiativeEvent[];
+}
+```
+
+These interfaces are the wire contract serialized by the existing Java
+records; the implementation must mirror those records without adding view-only
+fields.
+
+### Browser-derived and request state
+
+```ts
 
 export interface GateForm {
   decision: string;
@@ -108,17 +220,39 @@ export interface GateForm {
 export interface RunForm {
   stage: string;
 }
+
+export interface InitiativeViewState {
+  requirementSummary: string;
+  currentStage: StageState | null;
+  canDecide: boolean;
+  canRun: boolean;
+  unknownChecks: FeasibilityCheck[];
+  verdicts: ValidatorVerdict[];
+  attemptTiming: {
+    machineDurationMillis: number;
+    humanWaitDurationMillis: number;
+  } | null;
+}
 ```
 
-These interfaces are TO BUILD client types derived from the existing JSON
-response shape; the implementation must verify each field against the
-controller's serialized `Initiative`, `StageView`, `AttemptView`,
-`FeasibilityCheckView`, `DurationSummary` and `ValidatorVerdict` fields rather
-than inventing a second response contract. `GateForm` maps field-for-field
-onto the existing `GateDecisionRequest`: `decision`, `actor`, `reason` and
-`acceptedUnknownChecks`. The browser request passes through the existing
-`ClientScopeFilter` exactly once. The SPA must not hold or send an invented
-client id, widen scope, or hold a service token.
+`GateForm` maps field-for-field onto the existing `GateDecisionRequest`:
+`decision`, `actor`, `reason` and `acceptedUnknownChecks`.
+
+`InitiativeViewState` is derived browser state, not an API response. Its
+`requirementSummary` is selected from `requirement`; `currentStage` is selected
+from `stages` using the server's stage ordering and status; `canDecide` is
+derived from the server status `AWAITING_APPROVAL`; and `canRun` is derived
+from the server status and `blockers`, without reimplementing predecessor
+rules. `unknownChecks` comes from
+`attempts[].feasibilityChecks` where `status` is `UNKNOWN`, and `verdicts`
+comes from `attempts[].drafts[].validatorVerdicts`. `attemptTiming` comes from
+the selected attempt's `machineDurationMillis` and
+`humanWaitDurationMillis`; the initiative-level `durations` remains the
+separate server summary.
+
+The browser request passes through the existing `ClientScopeFilter` exactly
+once. The SPA must not hold or send an invented client id, widen scope, or
+hold a service token.
 
 ## 4. Behaviour
 
@@ -128,9 +262,11 @@ The workspace flow is:
    session and client scope. The API request passes through
    `ClientScopeFilter` exactly once and returns the `stages[].attempts[]`
    projection used by the timeline.
-2. Select the latest attempt by the same stage/attempt ordering as Java, then
-   display its draft, structured verdicts, blockers, artifact IDs and machine
-   versus human-wait duration.
+2. Select the current stage and attempt using the server's stage ordering and
+   status, then display its `drafts`, each draft's
+   `validatorVerdicts`, `blockers`, `artifacts` and the attempt's
+   `machineDurationMillis` and `humanWaitDurationMillis`. The initiative-level
+   `durations` is displayed separately.
 3. Render `UNKNOWN` checks as named unchecked items. For a gated feasibility
    approval, the actor must explicitly select every expected unknown check;
    the form must not silently submit an empty list.
@@ -223,7 +359,7 @@ Decision JSON example:
 | Invalid stage/run request | 400 | Preserve current view and show error |
 | Existing run or duplicate attempt | 409 or mapped API error | Show concurrency error; no local transition |
 | Gate missing actor/reason | 400 | Keep form and identify required fields |
-| Machine identity submitted | 400 | Refuse and do not reload as approved |
+| Server refuses machine identity | 400 | Render the refusal and do not reload as approved |
 | Unknown checks not exactly accepted | 400 | Show the named expected set |
 | Successful run/decision | 200 | Reload the read projection |
 
@@ -231,15 +367,18 @@ Decision JSON example:
 
 | Property | Type | Default | Validation |
 | --- | --- | --- | --- |
-| `studio.console.enabled` | `boolean` | `false` | explicit enablement |
+| `studio.console.enabled` | `boolean` | `false` | gates static-asset serving from `app` and registration of the dev origin |
 | `studio.console.dev-origin` | `URI` | unset | development only; must be an explicit non-wildcard origin |
 
 Production serves the built static assets from the same origin as the API,
 either from `app` static resources or a static host in front of the same
 gateway, so no CORS relaxation is needed. The Vite development server proxies
 `/api` to `http://localhost:8081`; `studio.console.dev-origin` permits only
-that explicitly configured development origin. A wildcard CORS origin is
-refused. The SPA never holds a service token or invented client id.
+that explicitly configured development origin when `studio.console.enabled` is
+true. A wildcard CORS origin is refused. The SPA never holds a service token or
+invented client id. When the flag is false, the application does not serve the
+console assets or register the development origin; it does not gate the
+existing JSON API routes.
 
 Actor authentication is not currently supplied by the repository; until it
 exists, deployment must place the console behind an authenticated boundary.
@@ -255,7 +394,7 @@ The API's caller-supplied actor guard is not authentication.
 | `CONSOLE-DECISION-ROUTE` | Gate forms submit only to the existing decision route. |
 | `CONSOLE-ACTOR-REQUIRED` | A gate cannot submit without a non-blank actor. |
 | `CONSOLE-REASON-REQUIRED` | A gate cannot submit without a non-blank reason. |
-| `CONSOLE-NO-MACHINE-APPROVAL` | Machine identities are refused by the existing Java guard. |
+| `CONSOLE-NO-MACHINE-APPROVAL` | The server owns machine-identity refusal; the browser renders its response. |
 | `CONSOLE-UNKNOWN-EXPLICIT` | `acceptedUnknownChecks` is shown and selected explicitly. |
 | `CONSOLE-NO-SILENT-RETRY` | Errors never trigger an automatic run or decision. |
 | `CONSOLE-NO-INVENTED-SCOPE` | The SPA never supplies or widens client scope. |
@@ -271,7 +410,7 @@ The API's caller-supplied actor guard is not authentication.
 | Run API rejects predecessor | refusal | Java existing event/attempt | Show predecessor message |
 | Concurrent run | conflict | Java existing conflict path | No optimistic state change |
 | Blank actor/reason | refusal | no gate decision | Client validation plus server error |
-| Machine actor | refusal | no gate decision | Show no-self-approval error |
+| Server refuses actor identity | refusal | no gate decision | Render the server refusal; do not display the gate as approved |
 | Partial unknown acceptance | refusal | no transition | Show exact expected unknown list |
 | Successful approval | Java gate decision | append-only decision/event | Reload; do not claim execution |
 
@@ -283,7 +422,7 @@ Component and unit tests use Vitest and React Testing Library:
 - `VerdictTableRendersStructuredRulesWithoutRecomputingThem`.
 - `UnknownCheckListRequiresEveryExpectedAcceptance`.
 - `GateFormRejectsBlankActorAndReason`.
-- `GateFormRejectsMachineIdentity`.
+- `GateFormRendersServerRefusalWithoutDisplayingApproval`.
 - `InitiativeApiPreservesServerStateAfter400404409And500`.
 - `InitiativeApiRefetchesAfterSuccessfulRunOrDecision`.
 - `InitiativeApiNeverSendsAServiceTokenOrInventedClientId`.

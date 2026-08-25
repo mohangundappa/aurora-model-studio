@@ -74,7 +74,7 @@ repositories live in `agentplatform`.
    projection and submits only to the existing run and decision routes.
 
 Before steps 6–8, Data Profiling live observation and experiment execution are
-blocked: no Java-side loop can truthfully profile warehouse rows, build
+blocked: no agent can truthfully profile warehouse rows, build
 features, train, evaluate or create model artifacts. Java remains the
 authority for thresholds, sample-size mathematics, statistical tests,
 promotion criteria and every state transition after Python is added.

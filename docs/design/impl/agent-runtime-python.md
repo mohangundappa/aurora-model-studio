@@ -172,8 +172,8 @@ free request-body field. No Python route exposes governance-schema access.
 | --- | --- | --- | --- |
 | `AGENT_SERVICE_JAVA_BASE_URL` | URL | required | authenticated HTTPS in production |
 | `AGENT_SERVICE_TOKEN` | secret | required | deployment secret; never provider key |
-| `AGENT_SERVICE_CONNECT_TIMEOUT` | duration | `PT3S` | positive |
-| `AGENT_SERVICE_REQUEST_TIMEOUT` | duration | `PT10S` | positive |
+| `AGENT_SERVICE_CONNECT_TIMEOUT_SECONDS` | `int` | `3` | 1–300 |
+| `AGENT_SERVICE_REQUEST_TIMEOUT_SECONDS` | `int` | `10` | 1–300 |
 | `AGENT_SERVICE_RECURSION_LIMIT_MULTIPLIER` | integer | `2` | positive |
 | `AGENT_SERVICE_CHECKPOINT_MODE` | enum | `DISABLED` | `DISABLED` or `DEBUG_ONLY` |
 
@@ -206,11 +206,11 @@ transition.
 
 | Condition | Python outcome | Java record |
 | --- | --- | --- |
-| Java unavailable before or during a graph | Stop with `PROVIDER_FAILED` or `TOOL_REFUSED`; do not retry around the seam refusal | Last accepted append, plus the failure if Java was reachable |
+| Java unavailable before or during a graph | Stop with `PROVIDER_FAILED`; do not retry around an unreachable seam | Python cannot record the outcome; Java's own dispatch timeout records the V18 failure row |
 | Java tool refuses | End graph with `TOOL_REFUSED` | Refused `agent_tool_calls` and associated attempt |
 | Java refuses an attempt or tool append for budget | End graph with `BUDGET_EXHAUSTED` | Prior V15 rows unchanged; refusal is returned to caller |
 | LangGraph recursion limit is exhausted | End graph with `BUDGET_EXHAUSTED` | Final accepted append and V16 terminal projection |
-| Pydantic request or response validation fails | End graph with `PROVIDER_FAILED` | Failed attempt with schema/refusal detail when Java is reachable |
+| Pydantic request or response validation fails | End graph with `VALIDATION_FAILED` | Failed attempt with schema detail when Java is reachable |
 | Java validator returns `UNKNOWN` | End with `HUMAN_GATE_REQUIRED` unless another failure applies | Verdict and citations in V15; Java owns gate status |
 | Java gateway returns `REFUSED` | End with `PROVIDER_REFUSED` | `llm_invocations` and linked attempt |
 | Uncited field reaches a judge | Preserve it as `UNKNOWN` | Citation failure and structured verdict in V15 |
