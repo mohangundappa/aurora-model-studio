@@ -83,7 +83,8 @@ class AgentRunResponse(BaseModel):
     verdicts: list[dict[str, Any]]
     termination: Literal[
         "ACCEPTED", "HUMAN_GATE_REQUIRED", "BUDGET_EXHAUSTED",
-        "PROVIDER_REFUSED", "PROVIDER_FAILED", "TOOL_REFUSED"
+        "PROVIDER_REFUSED", "PROVIDER_FAILED", "TOOL_REFUSED",
+        "VALIDATION_FAILED"
     ]
     attempts: int
     tool_calls: int
