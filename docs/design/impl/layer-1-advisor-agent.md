@@ -14,6 +14,11 @@ one blocked or waiting stage, and recommends recovery actions. It does not
 execute recommendations, call write methods, infer missing evidence as fact,
 or replace `InitiativeService`.
 
+The first version remains deterministic Java. The client's Python agent rule
+does not force a rewrite: if advisor wording becomes LLM-generated later, only
+that narration runs in the Python agent service; diagnosis remains Java. No
+current behaviour change is implied.
+
 ## 2. Module and package layout
 
 Use the existing `initiative` module and add the `agentplatform` dependency

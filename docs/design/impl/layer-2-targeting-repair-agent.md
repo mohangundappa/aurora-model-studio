@@ -1,10 +1,11 @@
 # Layer 2 Targeting Repair Agent
 
 **Status: TO BUILD.** The current targeting path is a one-shot
-`InitiativeService.finishTargeting` call. This specification turns it into a
-bounded repair loop while retaining the existing deterministic SQL judge.
+`InitiativeService.finishTargeting` call. This specification turns the new
+agent portion into a bounded LangGraph repair graph while retaining the
+existing deterministic SQL judge in Java.
 
-Realises [Layer 2 design capabilities](../layer-2-design-capabilities.md), part of [the implementation specification index](README.md); prerequisite: [agent platform runtime](agent-platform-runtime.md).
+Realises [Layer 2 design capabilities](../layer-2-design-capabilities.md), part of [the implementation specification index](README.md); prerequisites: [agent platform runtime](agent-platform-runtime.md) and [Python agent runtime](agent-runtime-python.md).
 
 ## 1. Scope
 
@@ -16,24 +17,27 @@ or change initiative stage status directly.
 
 ## 2. Module and package layout
 
-The existing Maven module is `initiative`; add the `agentplatform` dependency
-described in [the runtime specification](agent-platform-runtime.md). Create
-these new files under
+Keep the deterministic judge and Java tool registration in the existing
+`initiative` Maven module, using the [Java agent platform runtime](agent-platform-runtime.md).
+Create the agent graph under
+`python/agent_service/agent_service/capabilities/targeting.py` and keep these
+Java files under
 `initiative/src/main/java/com/aurora/studio/initiative/targeting/`:
 
 ```text
 TargetingDraft.java
 TargetingJudge.java
-TargetingRepairLoop.java
 GovernedReferenceLookupTool.java
 SqlDesignValidationTool.java
-TargetingLoopDefinition.java
 ```
 
-`SqlDesignValidator` remains the existing package-private class in
+`TargetingJudge`, `GovernedReferenceLookupTool` and
+`SqlDesignValidationTool` remain Java-owned. `SqlDesignValidator` remains the
+existing package-private class in
 `com.aurora.studio.initiative`; `SqlDesignValidationTool` is in that package
 or receives a new public facade in the same module. No validator logic moves
-to `agentplatform`.
+to Python or `agentplatform`. Prompts, repair strategy and iteration belong to
+the Python LangGraph.
 
 ## 3. Types
 
@@ -61,11 +65,6 @@ public interface TargetingJudge {
   List<TargetingVerdict> judge(TargetingValidationInput input);
 }
 
-public interface TargetingRepairLoop {
-  LoopOutcome<TargetingDraft, TargetingVerdict> run(
-      UUID initiativeId, UUID stageAttemptId, ModelRequirement requirement);
-}
-
 public record GovernedReferenceLookupInput(
     String objectType, String name, boolean includeCandidates) {}
 
@@ -85,32 +84,30 @@ rule names unchanged: `parseable-single-read-only`, `explicit-projection`,
 
 ## 4. Behaviour
 
-`TargetingRepairLoop.run`:
+The Python `targeting` `StateGraph`:
 
-1. Load the requirement through `DiscoveryService.getRequirement` and governed
-   assets through `KnowledgeService.search`; load lineage exactly as the
-   current `lineageContext` method does.
-2. Register two tools for this capability:
-   `GovernedReferenceLookupTool` and `SqlDesignValidationTool`. The first
-   returns only client-scoped governed metadata and evidence; it never returns
-   client rows. The second calls `SqlDesignValidator.validateCohort` and,
-   when a label exists and observables are declared,
-   `validateLabel`.
-3. Create the first `LlmRequest` with task id
+1. Call Java's registered `GovernedReferenceLookupTool` through the inbound
+   agent API. It returns only client-scoped governed metadata and evidence; it
+   never returns client rows.
+2. Request a structured draft through Java's completion route. The request
+   uses task id
    `targeting-repair-{stageAttemptId}-1`, template id
    `targeting-repair`, version `1`, schema id `targeting-repair-v1`, output
    limit `1200`, timeout `Duration.ofSeconds(10)`, and the existing
    `RedactionPolicy.extractionDefault()`.
-4. Include requirement, governed asset metadata, lineage references, target
+3. Include requirement, governed asset metadata, lineage references, target
    observable, citation ids and structured tool output. Do not include
    unbounded prose verdicts as the repair instruction.
-5. Decode `drafts[]` into `TargetingDraft` records. Judge every draft and
-   choose no winner until the deterministic verdicts are available.
-6. Persist the attempt, its tool calls, invocation id, draft and verdicts.
+4. Send each draft to Java's `SqlDesignValidationTool`, which calls
+   `SqlDesignValidator.validateCohort` and, when applicable,
+   `validateLabel`. Judge every draft in Java and choose no winner until the
+   deterministic verdicts are available.
+5. Append the attempt, tool calls, invocation id, draft and verdicts through
+   Java.
    For `FAIL`, build the next prompt from the previous draft plus a sorted
    array of `{ruleId,status,reason}` verdicts. For `UNKNOWN`, preserve the
    citation gap and stop at the human gate; do not ask the model to guess.
-7. On a passing draft, return `ACCEPTED`; on only unknown rules, return
+6. On a passing draft, return `ACCEPTED`; on only unknown rules, return
    `HUMAN_GATE_REQUIRED`; after the budget, return the last draft and
    unresolved verdicts. The caller then persists the final stage result.
 
@@ -139,9 +136,8 @@ Pseudo-diff:
 -    verdicts.addAll(SqlDesignValidator.validateCohort(...));
 -  }
 -  return finishGeneratedStage(...);
-+  LoopOutcome<TargetingDraft, TargetingVerdict> outcome =
-+      targetingRepairLoop.run(base.id(), attempt.id(),
-+          discovery.getRequirement(base.requirementId()));
++  AgentRunResponse outcome =
++      agentService.run(base.id(), attempt.id(), "TARGETING_REPAIR");
 +  List<GenerationDraft> persisted =
 +      outcomeToGenerationDrafts(outcome, attempt.id());
 +  StageStatus status = switch (outcome.termination()) {
@@ -195,27 +191,27 @@ the attempt ledger; do not expose provider prompts.
 ```mermaid
 sequenceDiagram
   participant I as "InitiativeService"
-  participant L as "TargetingRepairLoop"
-  participant T as "Targeting tools"
-  participant G as "LlmGateway"
-  participant J as "SqlDesignValidator"
-  participant A as "AttemptLedger"
-  I->>L: Run stage attempt
-  L->>T: Read governed assets and lineage
-  T-->>L: Metadata and evidence
-  L->>G: Structured targeting request
-  G-->>L: Draft and invocation id
-  L->>J: Validate cohort and label SQL
-  J-->>L: Structured verdicts
-  L->>A: Append draft, verdicts and tool calls
+  participant P as "Python LangGraph"
+  participant T as "Java agent tools"
+  participant G as "Java LlmGateway route"
+  participant J as "Java SqlDesignValidator"
+  participant A as "Java AttemptLedger"
+  I->>P: Start bounded targeting graph
+    P->>T: Read governed assets and lineage
+  T-->>P: Metadata and evidence
+  P->>G: Structured targeting request
+  G-->>P: Draft and invocation id
+  P->>J: Validate cohort and label SQL
+  J-->>P: Structured verdicts
+  P->>A: Append draft, verdicts and tool calls
   alt FAIL verdict and budget remains
-    L->>G: Repair with prior draft and verdicts
-    G-->>L: Revised draft
-    L->>J: Validate revised draft
-    J-->>L: Revised verdicts
-    L->>A: Append next attempt
+    P->>G: Repair with prior draft and verdicts
+    G-->>P: Revised draft
+    P->>J: Validate revised draft
+    J-->>P: Revised verdicts
+    P->>A: Append next attempt
   else PASS or UNKNOWN
-    L-->>I: Return final draft and verdicts
+    P-->>I: Return final draft and verdicts
   end
 ```
 

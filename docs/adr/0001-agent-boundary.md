@@ -2,6 +2,7 @@
 
 [See the detailed layer designs](../design/README.md) for implementation contracts and audit detail.
 [See the implementation specifications](../design/impl/README.md) for typed build contracts and sequence.
+[The loop-runtime decision is superseded by ADR 0002](0002-per-layer-technology.md).
 
 - Status: accepted
 - Scope: Model Studio capability layers and their technology stack

@@ -2,11 +2,11 @@
 
 **Status: TO BUILD for both agents.** `DiscoveryService` recall, ranking,
 explanation and reuse scorecard are BUILT deterministic/application paths.
-This specification adds requirement interpretation, clarification questions
-and evidence gathering without allowing an agent to change recall, weights,
-dimensions or thresholds.
+This specification adds Python/LangGraph requirement interpretation,
+clarification questions and evidence gathering without allowing an agent to
+change recall, weights, dimensions or thresholds.
 
-Realises [Layer 2 design capabilities](../layer-2-design-capabilities.md), part of [the implementation specification index](README.md); prerequisite: [agent platform runtime](agent-platform-runtime.md).
+Realises [Layer 2 design capabilities](../layer-2-design-capabilities.md), part of [the implementation specification index](README.md); prerequisites: [agent platform runtime](agent-platform-runtime.md) and [Python agent runtime](agent-runtime-python.md).
 
 ## 1. Scope
 
@@ -19,23 +19,24 @@ client rows.
 
 ## 2. Module and package layout
 
-Use the existing `discovery` Maven module for discovery types and service
-integration; it already depends on `common`, `knowledge` and `gateway`.
-Create:
+Keep deterministic recall, ranking and scorecard inspection in the existing
+`discovery` Maven module. Create the agent graphs under
+`python/agent_service/agent_service/capabilities/discovery.py` and
+`reuse.py`, alongside these Java records and integration types:
 
 ```text
 discovery/src/main/java/com/aurora/studio/discovery/ClarificationQuestion.java
 discovery/src/main/java/com/aurora/studio/discovery/ClarificationAnswer.java
-discovery/src/main/java/com/aurora/studio/discovery/DiscoveryAgent.java
-discovery/src/main/java/com/aurora/studio/discovery/ReuseEvidenceAgent.java
+discovery/src/main/java/com/aurora/studio/discovery/DiscoveryAgentResult.java
+discovery/src/main/java/com/aurora/studio/discovery/ReuseEvidenceResult.java
 discovery/src/main/java/com/aurora/studio/discovery/ReuseEvidencePacket.java
 discovery/src/main/java/com/aurora/studio/discovery/CitedDimensionEvidence.java
 ```
 
-The bounded loop and ledger remain in `agentplatform`; `discovery` registers
-its retrieval and scorecard-inspection tools through the registry. If the
-agent is invoked through an initiative, `initiative` owns the orchestration
-call and persists the stage summary.
+The Python graphs call Java's authenticated tool, completion and append routes.
+If an agent is invoked through an initiative, `initiative` owns the
+orchestration call and persists the stage summary. The six dimensions,
+weights and threshold remain Java-owned.
 
 ## 3. Types
 
@@ -100,34 +101,36 @@ the current `DiscoveryWeights`, not reuse dimensions and must not be renamed.
 
 ## 4. Behaviour
 
-### Discovery Agent
+### Discovery Agent LangGraph
 
-1. Read the submitted `ModelRequirement` and visible governed knowledge.
+1. Request the submitted `ModelRequirement` and visible governed knowledge
+   through Java's registered discovery tools.
 2. Identify absent or ambiguous fields using deterministic required-field
    checks. The model may phrase a question and group related context, but it
    cannot mark a required field answered.
-3. Persist each question in the current initiative stage attempt's typed
-   `generation_drafts` JSON as `questionId`, field path, kind and evidence
-   ids. No new migration is allocated for a question table.
+3. Return each question to Java for persistence in the current initiative
+   stage attempt's typed `generation_drafts` JSON as `questionId`, field path,
+   kind and evidence ids. No new migration is allocated for a question table.
 4. Return questions before candidate comparison when any required question is
    unanswered. The next stage remains blocked until all required questions have
-   answers.
-5. Accept an answer only through a proposed route owned by the initiative
-   controller, validate the non-blank actor and answer, verify citations, and
-   append the answer to the stage attempt ledger. The actor is caller-supplied
-   and unverified, matching the existing gate model.
+   answers; Python does not write that stage status.
+5. Accept an answer only through a route owned by the initiative controller,
+   validate the non-blank actor and answer, verify citations, and append the
+   answer to the stage attempt ledger. The actor is caller-supplied and
+   unverified, matching the existing gate model.
 6. Re-run interpretation with the original requirement plus all persisted
    answers. The deterministic `DiscoveryService.run` then performs embedding
    recall, ranking and classification.
 
-### Reuse Evidence Agent
+### Reuse Evidence Agent LangGraph
 
-1. Receive a candidate and its current deterministic scorecard.
-2. Retrieve evidence rows for each of the six dimensions.
+1. Receive a candidate and its current deterministic scorecard from Java.
+2. Retrieve evidence rows for each of the six dimensions through Java tools.
 3. Produce one `CitedDimensionEvidence` record per dimension. Missing or
    uncited input is a gap and resolves to `UNKNOWN`.
-4. Store the packet in the attempt ledger and return it to the existing human
-   gate. The agent never changes a scorecard value or classification.
+4. Return the packet to Java, which stores it in the attempt ledger and sends
+   it to the existing human gate. The agent never changes a scorecard value or
+   classification.
 5. `DiscoveryService` remains the sole owner of `REUSE_THRESHOLD = 0.80` and
    the scorecard calculation. A human may approve a proposal with unknown
    dimensions only through the existing gate and accepted-unknown contract.

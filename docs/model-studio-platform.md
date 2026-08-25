@@ -3,6 +3,7 @@
 [See the box-by-box layer mapping](layer-mapping.md) for the terse implementation and gap lookup.
 [See the detailed layer designs](design/README.md) for implementation contracts and audit detail.
 [See the implementation specifications](design/impl/README.md) for typed build contracts and sequence.
+[See ADR 0002](adr/0002-per-layer-technology.md) for the per-layer technology rule.
 
 This document is the platform map for Aurora Model Studio. It uses the same
 layer names and lifecycle vocabulary as the conceptual model, but every
@@ -221,6 +222,10 @@ There are four main-code `LlmGateway.complete` calls:
 3. `InitiativeService`: targeting design drafts;
 4. `InitiativeService`: feature design drafts.
 
+New bounded agent graphs use Python and LangGraph, but every completion still
+crosses the Java `LlmGateway` boundary. LangGraph plans and iterates; Java
+retains deterministic verdicts, persisted state and the ledger.
+
 `GatewayService` validates the response schema, records the invocation in
 `llm_invocations`, retries retryable failures, and returns outcomes such as
 `OK`, `REFUSED`, `SCHEMA_INVALID`, or `FAILED`. A provider failure in a design
@@ -326,8 +331,10 @@ CLI-style operational runs in addition to HTTP.
 
 | Concern | Implementation |
 | --- | --- |
-| Language | Java 21 |
+| Experience | React 18, TypeScript and Vite frontend TO BUILD |
+| Backend language | Java 21 |
 | Web runtime | Spring Boot 3.4.5 and Spring MVC |
+| Agent runtime | Python with LangGraph TO BUILD; graph execution only |
 | Application port | `8081` |
 | Database | PostgreSQL with pgvector on host port `5433` |
 | Persistence | JDBC |

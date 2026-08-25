@@ -3,6 +3,7 @@
 [See the standalone platform map](model-studio-platform.md) for the layered product view; this document remains the code-level architecture view.
 [See the detailed layer designs](design/README.md) for implementation contracts and audit detail.
 [See the implementation specifications](design/impl/README.md) for typed build contracts and sequence.
+[See ADR 0002](adr/0002-per-layer-technology.md) for the per-layer technology rule.
 
 Aurora Model Studio is the design and governance plane for customer-intelligence
 artifacts. It imports and interprets source material, retrieves governed knowledge,
@@ -21,7 +22,7 @@ the module structure.
 flowchart LR
   Client["Client CDP and MarTech estate<br/>Role: system of record<br/>Responsibility: profiles, consent, identity, audiences<br/>Tech: client-owned CDP and MarTech systems"]
   Runtime["Aurora Intelligence<br/>Role: runtime plane<br/>Responsibility: signals, decisions, experiments, customer experiences<br/>Tech: separate Aurora Intelligence product"]
-  Studio["Aurora Model Studio<br/>Role: design and governance plane<br/>Responsibility: governed knowledge, discovery, initiative stages, approved handoff packages<br/>Tech: Java 21, Spring Boot 3.4.5, PostgreSQL and pgvector on 5433, Flyway, JDBC, app on 8081, provider-neutral LLM gateway, Testcontainers and JUnit 5"]
+  Studio["Aurora Model Studio<br/>Role: design and governance plane<br/>Responsibility: governed knowledge, discovery, initiative stages, approved handoff packages<br/>Tech: React frontend TO BUILD, Java 21 and Spring Boot 3.4.5 backend, Python/LangGraph agent runtime TO BUILD, PostgreSQL and pgvector on 5433, Flyway, JDBC, app on 8081, provider-neutral LLM gateway, Testcontainers and JUnit 5"]
 
   Client <--> Runtime
   Client <--> Studio

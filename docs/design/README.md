@@ -4,7 +4,8 @@ These documents answer how each conceptual layer is implemented today and how
 the missing parts should be built. Read [the platform map](../model-studio-platform.md)
 for the overall shape, [the layer mapping](../layer-mapping.md) for the terse
 box lookup, and [the agent boundary ADR](../adr/0001-agent-boundary.md) for the
-governance rule.
+governance rule and [ADR 0002](../adr/0002-per-layer-technology.md) for the
+per-layer technology rule.
 For implementation-ready Java-side specifications, read the
 [implementation specifications](impl/README.md).
 
@@ -28,7 +29,7 @@ The structural rule from the architecture diagram is:
 
 | Rail | Design | Implementation specifications | Current status |
 | --- | --- | --- | --- |
-| Agent platform | [Agent platform](cross-cutting-agent-platform.md) | [Agent platform runtime](impl/agent-platform-runtime.md) | Gateway BUILT; tools, loops, ledger and evidence rule TO BUILD |
+| Agent platform | [Agent platform](cross-cutting-agent-platform.md) | [Agent platform runtime](impl/agent-platform-runtime.md), [Python agent runtime](impl/agent-runtime-python.md) | Gateway BUILT; tools, Python graphs, ledger and evidence rule TO BUILD |
 | Human gate | [Human gate](cross-cutting-human-gate.md) | [Feature-set binding](impl/human-gate-feature-set-binding.md) | Built mechanics; Layer 3 hash-bound feature-set gate TO BUILD |
 
 ## How to read these designs
@@ -41,20 +42,21 @@ TO BUILD contracts are proposals, not existing routes or tables.
 ## Reading path to implementation
 
 Start with the [platform map](../model-studio-platform.md) for system boundaries
-and responsibilities. Read the relevant layer or rail design from the tables
-above for what the capability is and why it belongs there. Follow its
-implementation specification for what to type, including
-interfaces, schemas, behaviour and tests. Use the [implementation build
-order](impl/README.md#build-order) to sequence the work and its prerequisites.
+and responsibilities. Read the relevant layer or rail design for what the
+capability is and why it belongs there. Follow its implementation specification
+for what to type, including interfaces, schemas, behaviour and tests. Use the
+[implementation build order](impl/README.md#build-order) to sequence the work
+and its prerequisites: the design answers what and why, while the spec answers
+what to type.
 
 ## Build summary
 
 | Area | Built now | To build |
 | --- | --- | --- |
-| Business-facing experience | HTTP controllers and `ImporterCommand` only | Single initiative workspace with no local workflow state |
+| Business-facing experience | HTTP controllers and `ImporterCommand` only | React initiative workspace with no local workflow state |
 | Orchestration | Nine-stage state machine, gates, attempts, events and durations | Read-only advisor and richer telemetry |
 | Design capabilities | Recall, reuse, feasibility, design validators and experiment mathematics | Bounded agent loops around those deterministic judges |
-| Agent platform | `LlmGateway` and `EmbeddingProvider` | Tool registry, loop controller, attempt ledger and evidence-policy enforcement |
+| Agent platform | `LlmGateway` and `EmbeddingProvider` | Java tool registry and ledger, Python LangGraph runtime and evidence-policy enforcement |
 | Execution | None | Data and feature execution plus ML build and evaluation |
 | Foundation | Governed knowledge, evidence, provenance, conflicts and embeddings | Swappable client data and ML platform adapters |
 

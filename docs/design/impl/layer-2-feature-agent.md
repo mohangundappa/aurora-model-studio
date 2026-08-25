@@ -2,10 +2,10 @@
 
 **Status: TO BUILD.** The current `InitiativeService.finishFeature` path is a
 one-shot gateway call followed by `featureVerdicts`. This specification adds a
-bounded feature loop and extracts the deterministic judge without changing
-its authority.
+bounded LangGraph feature graph and keeps the deterministic judge in Java
+without changing its authority.
 
-Realises [Layer 2 design capabilities](../layer-2-design-capabilities.md), part of [the implementation specification index](README.md); prerequisite: [agent platform runtime](agent-platform-runtime.md).
+Realises [Layer 2 design capabilities](../layer-2-design-capabilities.md), part of [the implementation specification index](README.md); prerequisites: [agent platform runtime](agent-platform-runtime.md) and [Python agent runtime](agent-runtime-python.md).
 
 ## 1. Scope
 
@@ -17,14 +17,15 @@ rows, approve a candidate or change `REUSE_THRESHOLD`.
 
 ## 2. Module and package layout
 
-Use the existing `initiative` Maven module with the `agentplatform`
-dependency. Create under
+Keep the deterministic judge and catalog tool in the existing `initiative`
+Maven module with the `agentplatform` dependency. Create the graph under
+`python/agent_service/agent_service/capabilities/feature.py` and keep these
+Java files under
 `initiative/src/main/java/com/aurora/studio/initiative/feature/`:
 
 ```text
 FeatureDraft.java, FeatureVerdict.java, FeatureJudge.java
-FeatureRepairLoop.java, GovernedFeatureCatalogTool.java
-FeatureLoopDefinition.java
+GovernedFeatureCatalogTool.java
 ```
 
 Extract the private method
@@ -79,27 +80,25 @@ chosen evidence.
 
 ## 4. Behaviour
 
-`FeatureRepairLoop.run`:
+The Python `feature` `StateGraph`:
 
-1. Read the requirement and governed data-asset metadata from
-   `KnowledgeService`; read approved feature catalog entries with their
-   `knowledgeKey`, name, attributes and evidence.
-2. Register `GovernedFeatureCatalogTool` and the deterministic
-   `FeatureJudge`. The catalog tool returns metadata only.
-3. Build an LLM request with task id
+1. Call Java's `GovernedFeatureCatalogTool` through the inbound agent API.
+   The catalog tool returns metadata only.
+2. Request a draft through Java's completion route. The request uses task id
    `feature-repair-{stageAttemptId}-{attempt}`, template id
    `feature-repair`, version `1`, schema id `feature-repair-v1`, the existing
    redaction policy, 1200 output tokens and a ten-second provider timeout.
-4. For every returned draft, normalise strings and source-column ordering only
+3. For every returned draft, normalise strings and source-column ordering only
    for comparison. Preserve the source-column list order in the submitted
    draft and preserve all cited evidence ids.
-5. Apply the exact duplicate rule below before leakage and point-in-time
+4. Send each draft to Java's `FeatureJudge`. Apply the exact duplicate rule
+   below before leakage and point-in-time
    verdicts. A duplicate yields `REUSE`, not a newly created feature
    candidate.
-6. Persist the attempt and verdicts. A failed draft is the only input to a
+5. Append the attempt and verdicts through Java. A failed draft is the only input to a
    repair prompt; the prompt includes the prior structured verdict records,
    not a model-generated explanation of why it failed.
-7. Create a knowledge candidate only after a deterministic `ACCEPTED` result,
+6. Create a knowledge candidate only after a deterministic `ACCEPTED` result,
    using the existing `KnowledgeService.createExtracted` path and
    `knowledge.addEvidence` plus `knowledge.addFieldProvenance`. The candidate
    remains governed by its existing lifecycle and is not approved by the loop.
@@ -144,9 +143,8 @@ Pseudo-diff:
 -    if ("ACCEPTED".equals(outcome)) createFeatureCandidate(draft, result.invocationId());
 -  }
 -  return finishGeneratedStage(...);
-+  LoopOutcome<FeatureDraft, FeatureVerdict> outcome =
-+      featureRepairLoop.run(base.id(), attempt.id(),
-+          discovery.getRequirement(base.requirementId()));
++  AgentRunResponse outcome =
++      agentService.run(base.id(), attempt.id(), "FEATURE_DESIGN");
 +  saveFeatureAttempts(attempt, started, outcome);
 +  if (outcome.termination() == LoopTermination.ACCEPTED) {
 +    createFeatureCandidate(outcome.lastDraft(), outcome.lastInvocationId());
@@ -155,7 +153,7 @@ Pseudo-diff:
  }
 ```
 
-The actual implementation must adapt `LoopOutcome` to the existing
+The actual implementation must adapt the Python graph response to the existing
 `GenerationDraft` JSON shape and preserve all current stage summary writes.
 `createFeatureCandidate` remains below the human gate's existing design-stage
 boundary; no new candidate is treated as approved.

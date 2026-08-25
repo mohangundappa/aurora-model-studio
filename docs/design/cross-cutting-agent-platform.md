@@ -10,8 +10,8 @@ provider-specific application, or a replacement for deterministic validators.
 ## 2. Status
 
 **Gateway BUILT; the rest is TO BUILD.** `LlmGateway` and
-`EmbeddingProvider` are implemented. Tool registration, bounded loop control,
-an attempt ledger and evidence-policy enforcement do not exist.
+`EmbeddingProvider` are implemented. Tool registration, the Python LangGraph
+runtime, an attempt ledger and evidence-policy enforcement do not exist.
 
 ## 3. Components
 
@@ -20,7 +20,7 @@ an attempt ledger and evidence-policy enforcement do not exist.
 | Provider boundary | Redact inputs, request structured output, retry retryable responses and record invocation | `LlmGateway`, `GatewayService`, `llm_invocations` | Application call is single-shot; one physical provider call may be retried |
 | Embedding boundary | Produce recall vectors | `EmbeddingProvider`, `DiscoveryEmbeddingWriter` | Deterministic default; OpenAI opt-in |
 | Tool registry | Expose retrieval, catalog query, feature build and validators | TO BUILD | Tools must be capability-scoped and auditable |
-| Bounded Loop Controller | Hold typed loop state and enforce attempt budget | TO BUILD | No unbounded autonomy |
+| Python LangGraph runtime | Execute typed capability graphs and bounded repair iteration | TO BUILD | Checkpointer is working memory only; Java enforces the budget |
 | Attempt Ledger | Persist every draft, verdict and retry for replay | TO BUILD | Proposed DDL below |
 | Evidence policy hook | Reject uncited agent input as threshold-satisfying evidence | TO BUILD | Current provenance storage is not enforcement |
 
@@ -56,8 +56,6 @@ record ToolCall<I>(String callId, String capability, I input) {}
 
 record LoopBudget(int maxAttempts, int maxToolCalls) {}
 
-record LoopState<I, O>(
-    String loopId, I input, O latestDraft, List<?> verdicts, int attempt) {}
 ```
 
 The tool registry must expose governed retrieval, catalog or warehouse query,
@@ -106,40 +104,50 @@ No such table exists today.
 
 ```mermaid
 sequenceDiagram
-  participant A as "Capability agent"
-  participant L as "Bounded loop controller"
+  participant P as "Python LangGraph"
+  participant J as "Java agent platform"
   participant T as "Tool registry"
   participant G as "LlmGateway"
   participant V as "Deterministic judge"
   participant D as "Attempt ledger"
-  A->>L: Start typed loop
-  L->>T: Retrieve governed evidence
-  T-->>L: Evidence result
-  L->>G: Request structured draft
-  G-->>L: Draft and invocation id
-  L->>V: Submit draft for verdict
-  V-->>L: Deterministic verdict
-  L->>D: Append draft verdict and tool calls
+  P->>J: Start typed capability graph
+  J->>T: Retrieve governed evidence
+  T-->>J: Evidence result
+  P->>J: Request structured draft
+  J->>G: Proxy completion
+  G-->>J: Draft and invocation id
+  J-->>P: Draft and invocation id
+  P->>J: Submit draft for verdict
+  J->>V: Run deterministic validator
+  V-->>J: Deterministic verdict
+  J-->>P: Verdict
+  P->>J: Append draft, verdict and tool calls
   alt Verdict requires bounded repair
-    L->>G: Request revised draft
-    G-->>L: Revised draft
-    L->>V: Submit revised draft
-    V-->>L: Revised verdict
-    L->>D: Append next attempt
+    P->>J: Request revised draft
+    J->>G: Proxy completion
+    G-->>J: Revised draft
+    J-->>P: Revised draft
+    P->>J: Submit revised draft
+    J->>V: Run deterministic validator
+    V-->>J: Revised verdict
+    J-->>P: Revised verdict
+    P->>J: Append next attempt
   end
-  L-->>A: Final draft and verdict
+  P-->>J: Return final draft and verdict
 ```
 
 ## 7. Deterministic vs agent split
 
 The agent chooses how to gather evidence and how to phrase a draft. Tools may
-return observations and validator verdicts. The loop controller owns the fixed
-budget and typed transitions. Deterministic code owns thresholds, arithmetic,
-schema and SQL guards, lifecycle transitions and gate outcomes.
+return observations and validator verdicts. Python LangGraph owns graph
+iteration, while Java enforces the fixed budget and persists the typed
+transitions. Deterministic code owns thresholds, arithmetic, schema and SQL
+guards, lifecycle transitions and gate outcomes.
 
-LangGraph, if adopted, sits inside a bounded capability loop on the Python
-side. It does not replace `LlmGateway`, own workflow state, or become the
-provider boundary. AutoGen is rejected; LangChain remains low priority.
+LangGraph is the specified graph executor inside bounded capability loops on
+the Python side. It does not replace `LlmGateway`, own workflow state, become
+the provider boundary or make verdicts. AutoGen remains rejected; LangChain
+remains a framework around agent behaviour, not the provider boundary.
 
 ## 8. Failure and refusal behaviour
 
@@ -158,8 +166,10 @@ provider boundary. AutoGen is rejected; LangChain remains low priority.
 The built boundary is Java 21, Spring Boot 3.4.5, JDBC and PostgreSQL. It uses
 provider-neutral `LlmGateway`, deterministic and OpenAI adapters, Java
 `HttpClient` for the OpenAI embedding adapter, and Flyway for the schema.
-Future bounded agent loops may use Python 3.12, FastAPI and optionally
-LangGraph, while deterministic judges remain in Java.
+New bounded agent loops use Python with FastAPI and LangGraph, while
+deterministic judges, thresholds, persisted state and the ledger remain in
+Java. LangGraph's checkpointer is working memory only and is not the system of
+record.
 
 ## 10. Open questions / risks
 
@@ -173,7 +183,8 @@ LangGraph, while deterministic judges remain in Java.
 
 | Component | Implementation specification | What the specification adds |
 | --- | --- | --- |
-| Agent platform runtime | [Agent platform runtime](impl/agent-platform-runtime.md) | Typed tools, bounded loops, append-only attempt records and citation enforcement |
+| Agent platform runtime | [Agent platform runtime](impl/agent-platform-runtime.md) | Java tools, inbound budget enforcement, append-only attempt records and citation enforcement |
+| Python agent runtime | [Python agent runtime](impl/agent-runtime-python.md) | LangGraph capability graphs that call Java tools, validators and governed completion routes |
 
 Provider-specific tool implementations and the final retention policy have no
 separate implementation specification yet. The runtime spec defines the

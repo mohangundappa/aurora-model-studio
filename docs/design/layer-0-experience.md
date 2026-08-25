@@ -127,9 +127,10 @@ resolved by client-side state mutation.
 
 ## 9. Tech stack
 
-The existing view is Spring MVC over Java 21 and Spring Boot 3.4.5, using
-JSON and JDBC-backed records. A future console may use a separate web runtime,
-but it must call the HTTP API and must not duplicate the workflow state machine.
+The proposed console is React 18 and TypeScript with Vite in a separate
+frontend project. Spring Boot remains a JSON API over Java 21 and
+JDBC-backed records; the browser calls the existing API and must not duplicate
+the workflow state machine.
 
 ## 10. Open questions / risks
 
@@ -142,8 +143,8 @@ but it must call the HTTP API and must not duplicate the workflow state machine.
 
 | Component | Implementation specification | What the specification adds |
 | --- | --- | --- |
-| Initiative workspace | [Layer 0 console](impl/layer-0-console.md) | Server-rendered views, typed read/write contracts, scope propagation and refusal behaviour |
+| Initiative workspace | [Layer 0 console](impl/layer-0-console.md) | React SPA, typed JSON contracts, scope propagation and refusal behaviour |
 
-The conversational assistant interaction and any separate frontend do not have
-an implementation specification yet. The console spec covers the server-rendered
-workspace, while the assistant interaction remains a future experience decision.
+The conversational assistant interaction has no implementation specification
+yet. The console spec covers the React workspace, while the assistant
+interaction remains a future experience decision.

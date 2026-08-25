@@ -1,16 +1,18 @@
 # Agent platform runtime
 
 **Status: TO BUILD, except for the existing `gateway` boundary named below.**
-This specification adds a Java `agentplatform` module for tools, bounded
-capability loops, attempt persistence and evidence-citation enforcement. It
-does not add a new provider boundary, workflow state machine, validator
-threshold, human approval path or Python execution service.
+This specification adds a Java `agentplatform` module for tools, inbound
+bounded-loop controls, attempt persistence and evidence-citation enforcement.
+The Python agent service runs the graph; Java remains the boundary that
+executes tools, proxies completions, owns the ledger and enforces verdict
+controls. It does not add a new provider boundary, workflow state machine,
+validator threshold or human approval path.
 
 Realises [the agent platform rail](../cross-cutting-agent-platform.md), part of [the implementation specification index](README.md).
 
 ## 1. Scope
 
-Build typed tool dispatch, a fixed-budget loop controller, append-only attempt
+Build typed tool dispatch, fixed-budget inbound controls, append-only attempt
 and tool-call records, and a deterministic control that prevents uncited agent
 fields from satisfying a judge. `LlmGateway`, `GatewayService`, `LlmRequest`,
 `LlmResult`, `LlmOutcome`, `EmbeddingProvider` and `llm_invocations` are
@@ -40,13 +42,16 @@ files under
 
 ```text
 Tool.java, ToolCall.java, ToolResult.java, ToolSuccess.java, ToolRefusal.java
-ToolRegistry.java, LoopBudget.java, LoopState.java, LoopOutcome.java
-LoopDefinition.java, LoopController.java, DefaultLoopController.java
-LoopTermination.java, LoopStateSnapshot.java
+ToolRegistry.java, LoopBudget.java, LoopTermination.java
+LoopStateSnapshot.java
 AttemptLedger.java, AttemptLedgerRepository.java
 AgentAttempt.java, ToolCallRecord.java
 EvidenceCitation.java, EvidenceBoundValue.java
 EvidenceCitationVerifier.java, AgentPlatformProperties.java
+AgentPlatformInboundController.java
+AgentToolDispatchRequest.java, AgentCompletionRequest.java
+AgentAttemptAppendRequest.java, AgentToolCallAppendRequest.java
+AgentCompletionResponse.java
 ```
 
 Put `V15__agent_attempt_ledger.sql` and
@@ -110,26 +115,6 @@ public record LoopBudget(
     Duration toolTimeout,
     Duration loopTimeout) {}
 
-public record LoopState<D, V>(
-    UUID loopId,
-    UUID initiativeId,
-    UUID stageAttemptId,
-    String capability,
-    int attempt,
-    D latestDraft,
-    List<V> latestVerdicts,
-    int toolCalls,
-    Instant startedAt) {}
-
-public record LoopOutcome<D, V>(
-    UUID loopId,
-    D lastDraft,
-    List<V> lastVerdicts,
-    LoopTermination termination,
-    int attempts,
-    int toolCalls,
-    UUID lastInvocationId) {}
-
 public enum LoopTermination {
   ACCEPTED,
   HUMAN_GATE_REQUIRED,
@@ -138,31 +123,6 @@ public enum LoopTermination {
   PROVIDER_FAILED,
   TOOL_REFUSED,
   VALIDATION_FAILED
-}
-
-public interface LoopDefinition<D, V> {
-  String capability();
-  LoopBudget budget();
-  D initialInput();
-  LlmRequest requestFor(LoopState<D, V> state);
-  D decode(LlmResult result);
-  List<V> judge(D draft, List<EvidenceCitation> citations);
-  boolean accepted(List<V> verdicts);
-  boolean requiresHumanGate(List<V> verdicts);
-  D repairInput(LoopState<D, V> state);
-}
-
-public interface LoopController {
-  <D, V> LoopOutcome<D, V> run(
-      UUID initiativeId, UUID stageAttemptId, LoopDefinition<D, V> definition);
-}
-
-public final class DefaultLoopController implements LoopController {
-  public DefaultLoopController(
-      LlmGateway gateway,
-      ToolRegistry tools,
-      AttemptLedger ledger,
-      EvidenceCitationVerifier evidence) {}
 }
 
 public interface AttemptLedger {
@@ -194,6 +154,60 @@ public record ToolCallRecord(
     String refusalCode,
     Instant startedAt,
     Instant completedAt) {}
+
+public record AgentToolDispatchRequest(
+    UUID loopId,
+    UUID attemptId,
+    int attempt,
+    String capability,
+    String toolName,
+    JsonNode input) {}
+
+public record AgentCompletionRequest(
+    UUID loopId,
+    UUID attemptId,
+    String taskId,
+    String promptTemplateId,
+    String promptTemplateVersion,
+    JsonNode responseSchema,
+    String prompt,
+    int maxOutputTokens,
+    Duration timeout) {}
+
+public record AgentAttemptAppendRequest(
+    UUID loopId,
+    int attempt,
+    JsonNode input,
+    JsonNode draft,
+    JsonNode verdicts,
+    String outcome,
+    UUID llmInvocationId,
+    Instant startedAt,
+    Instant completedAt) {}
+
+public record AgentToolCallAppendRequest(
+    UUID loopId,
+    UUID attemptId,
+    UUID callId,
+    String toolName,
+    JsonNode input,
+    JsonNode output,
+    String outcome,
+    String refusalCode,
+    Instant startedAt,
+    Instant completedAt) {}
+
+public record AgentCompletionResponse(
+    UUID invocationId,
+    JsonNode response,
+    String responseSchemaId) {}
+
+public interface AgentPlatformInboundPort {
+  ToolResult<?> dispatch(AgentToolDispatchRequest request);
+  AgentCompletionResponse complete(AgentCompletionRequest request);
+  UUID appendAttempt(AgentAttemptAppendRequest request);
+  UUID appendToolCall(AgentToolCallAppendRequest request);
+}
 
 public record LoopStateSnapshot(
     UUID loopId,
@@ -235,37 +249,37 @@ each definition supplies its own task id, `promptTemplateId`,
 
 ## 4. Behaviour
 
-`LoopController.run` performs these steps in one service operation:
+`AgentPlatformInboundController` exposes the Java return direction for the
+Python graph:
 
-1. Validate the client context, capability, positive budget and stage-attempt
-   linkage. Insert `capability_loop_state` as `RUNNING` in a transaction.
-2. Read the initial governed input and citation set. Run the evidence
-   enforcement hook before the first provider call; uncited fields are
-   recorded as `UNKNOWN`, not silently dropped.
-3. For each attempt from one through `maxAttempts`, stop if the loop timeout,
-   attempt timeout or tool-call budget is exhausted.
-4. Execute only registered tools for the capability. Check capability and
-   client scope before each call; append the tool-call record in the same
-   transaction as its result.
-5. Build the typed `LlmRequest`, call `LlmGateway.complete`, and retain its
-   invocation id. `GatewayService` may make three physical provider attempts
-   (`attempt <= 2`); this loop counts one application-level call.
-6. Decode only a successful, schema-valid payload. Run the deterministic judge
-   against the draft and citations. Append the draft, verdicts, outcome,
-   invocation id and timing to `agent_attempts`.
-7. Return `ACCEPTED` only when every required judge rule passes. Return
-   `HUMAN_GATE_REQUIRED` when only UNKNOWN evidence remains. Never write
-   initiative stage status or a gate decision.
-8. Otherwise build the next repair input from the previous draft and
-   structured verdicts, increment the attempt, and repeat.
-9. On exhaustion, update loop state to `BUDGET_EXHAUSTED` and return the last
-   draft and verdicts. The caller passes that result to `InitiativeService`,
-   which owns `StageStatus`.
+1. Authenticate `X-Aurora-Studio-Token` and resolve its client binding before
+   deserialising a request. Ignore any client id in a request body; the token
+   binding supplies the client scope.
+2. For a tool dispatch, validate the capability, loop id, attempt id and
+   recorded budget. Refuse with `TOOL_NOT_REGISTERED`,
+   `CLIENT_SCOPE_MISMATCH` or `TOOL_BUDGET_EXCEEDED` before execution when
+   applicable.
+3. Execute the registered `Tool` in Java, apply
+   `EvidenceCitationVerifier` to evidence-bearing outputs, and return the
+   sealed `ToolSuccess` or `ToolRefusal` JSON shape.
+4. For a completion, validate the attempt and budget, construct the existing
+   `LlmRequest` from the request's prompt template, version, response schema,
+   redaction policy and timeout, then call `LlmGateway.complete`. Return its
+   invocation id and schema-validated response; Python never receives a
+   provider key.
+5. For an attempt or tool-call append, verify the token scope, loop linkage,
+   monotonic attempt number and recorded budget, then insert the V15 row in a
+   short transaction. Once the recorded budget is spent, Java refuses further
+   appends even if a graph continues locally.
+6. No inbound method writes `initiative_stage_attempts`,
+   `initiative_events` or `initiative_gate_decisions`. The Python graph
+   returns its outcome to Java, and `InitiativeService` alone maps it to a
+   stage transition or human gate.
 
-Each database mutation is a short transaction. Provider calls occur outside a
-database transaction; the attempt transaction records the result after the
-call. A failed provider call still gets an attempt row linked to its
-`llm_invocation_id` when available.
+Tool execution and ledger writes are separately transactional. The gateway
+call occurs outside the ledger transaction, and its invocation id is retained
+in the following append. An append refusal is itself returned to Python and
+terminates the graph rather than being bypassed or retried around.
 
 ## 5. Schema
 
@@ -370,18 +384,47 @@ create index capability_loop_stage_idx
   on capability_loop_state(client_id, initiative_id, stage_attempt_id);
 ```
 
-`capability_loop_state` is a mutable current-state projection so the
-controller can atomically move `RUNNING` to a terminal status. The attempt and
-tool-call rows are the audit ledger and are immutable. Updates must include
-the expected current status to prevent lost transitions; a future migration
-may add an append-only state-event table.
+`capability_loop_state` is a mutable current-state projection so Java can
+atomically move `RUNNING` to a terminal status after Python returns. The
+attempt and tool-call rows are the audit ledger and are immutable. Updates must
+include the expected current status to prevent lost transitions; a future
+migration may add an append-only state-event table. The LangGraph checkpointer
+is working memory only and is not a substitute for this Java state or ledger.
 
 ## 6. HTTP contract
 
-No agent-platform HTTP route is required. Capability routes remain owned by
-`initiative`; proposed loop routes are defined in the targeting and feature
-specifications. `ToolRegistry` is an in-process interface, not a public
-endpoint.
+All routes are authenticated internal routes. They use the token-header
+conventions from `java-python-seam.md`:
+
+```text
+X-Aurora-Studio-Token: <deployment token>
+X-Aurora-Client: <client UUID>
+Idempotency-Key: <stable append or completion key>
+Content-Type: application/json
+```
+
+The client scope is derived from the authenticated token binding and checked
+against `X-Aurora-Client`; it is never accepted from a JSON field.
+
+| Route | Method | Request | Response |
+| --- | --- | --- | --- |
+| `/internal/agent/tools/dispatch` | POST | `AgentToolDispatchRequest` | `ToolSuccess` or `ToolRefusal` |
+| `/internal/agent/completions` | POST | `AgentCompletionRequest` | `AgentCompletionResponse` |
+| `/internal/agent/attempts` | POST | `AgentAttemptAppendRequest` | `{"id":"..."}` |
+| `/internal/agent/tool-calls` | POST | `AgentToolCallAppendRequest` | `{"id":"..."}` |
+
+| Condition | Status | Outcome |
+| --- | ---: | --- |
+| Valid authenticated dispatch or completion | 200 | Typed result |
+| Valid ledger append | 201 | New row id |
+| Missing or invalid token | 401/403 | No execution or persistence |
+| Client header not bound to token | 403 | `CLIENT_SCOPE_MISMATCH` |
+| Unknown capability/tool | 400 | `TOOL_NOT_REGISTERED` |
+| Recorded budget exhausted | 409 | `ATTEMPT_BUDGET_EXCEEDED` or `TOOL_BUDGET_EXCEEDED` |
+| Duplicate idempotency key with same body | 200 | Original result |
+| Duplicate key with different body | 409 | `IDEMPOTENCY_KEY_REUSE` |
+| Gateway refusal or failure | 502 | Bounded refusal; invocation remains audited |
+| Attempted stage or gate write | 403 | No such route or persistence path |
 
 ## 7. Configuration
 
@@ -403,17 +446,21 @@ four tools per attempt without permitting unbounded autonomy.
 | Identifier | Rule |
 | --- | --- |
 | `LOOP-BUDGET-POSITIVE` | All configured budgets are within the validated ranges. |
-| `LOOP-ATTEMPT-BOUND` | No attempt number exceeds `max-attempts`. |
-| `LOOP-TOOL-BOUND` | No tool call exceeds `max-tool-calls`. |
+| `LOOP-ATTEMPT-BOUND` | Java refuses an attempt append once `max-attempts` is spent. |
+| `LOOP-TOOL-BOUND` | Java refuses a tool dispatch or append once `max-tool-calls` is spent. |
 | `LOOP-CAPABILITY-SCOPE` | A tool must be registered for the current capability. |
 | `LOOP-CLIENT-SCOPE` | Every repository read and write uses the current client id. |
 | `LOOP-SCHEMA-VALID` | Only an `LlmOutcome.OK` payload accepted by its response schema is decoded. |
 | `LOOP-CITATION-REQUIRED` | A field used by a threshold needs a `knowledge_evidence` citation or recorded observation. |
-| `LOOP-NO-MACHINE-APPROVAL` | The controller never writes a gate decision or stage status. |
+| `LOOP-NO-MACHINE-APPROVAL` | Java inbound routes never write a gate decision or stage status. |
 
-The enforcement point for `LOOP-CITATION-REQUIRED` is immediately before a
-judge receives a draft. The hook verifies each `EvidenceBoundValue.citation`
-against `knowledge_evidence(client_id, id)`, records the citation in
+All seven rules in this table, including
+`LOOP-BUDGET-POSITIVE`, `LOOP-ATTEMPT-BOUND`, `LOOP-TOOL-BOUND`,
+`LOOP-CAPABILITY-SCOPE`, `LOOP-CLIENT-SCOPE`, `LOOP-CITATION-REQUIRED` and
+`LOOP-NO-MACHINE-APPROVAL`, remain Java-enforced. The enforcement point for
+`LOOP-CITATION-REQUIRED` is immediately before a deterministic judge receives
+a draft. The hook verifies each `EvidenceBoundValue.citation` against
+`knowledge_evidence(client_id, id)`, records the citation in
 `agent_attempts.input` and `verdicts`, and converts missing or cross-client
 citations to `UNKNOWN`. A tool result may be an equivalent recorded
 observation only when its tool-call row contains the observation and the judge
@@ -430,6 +477,7 @@ declares that tool as an allowed evidence source.
 | Judge returns FAIL | `REJECTED` or next repair | Attempt and verdicts | 200 stage result |
 | Judge returns UNKNOWN | `HUMAN_GATE_REQUIRED` | Attempt and verdicts | 200 stage result |
 | Budget or timeout exhausted | `BUDGET_EXHAUSTED` | Final attempt and loop state | 200 stage result; no approval |
+| Python continues after an append refusal | `BUDGET_EXHAUSTED` or refusal | Refusal and prior rows unchanged | 409 from inbound route |
 | Duplicate loop key | none | Existing rows unchanged | 409 |
 
 ## 10. Tests to write
@@ -440,20 +488,22 @@ Unit tests:
   `TOOL_NOT_REGISTERED`.
 - `ToolResultIsSealedIntoSuccessOrRefusal`: assert both typed variants expose
   stable codes.
-- `LoopControllerStopsAtMaxAttempts`: assert no fourth gateway call and a
-  `BUDGET_EXHAUSTED` outcome.
-- `LoopControllerStopsAtMaxToolCalls`: assert the next tool call is refused.
-- `LoopControllerPersistsStructuredVerdictsBeforeRepair`: capture repository
-  order and assert attempt one is appended before attempt two is requested.
+- `InboundAttemptAppendRefusesSpentBudget`: assert no append is accepted after
+  the Java budget is exhausted.
+- `InboundToolDispatchRefusesSpentToolBudget`: assert the next tool call is
+  refused server-side.
+- `InboundAppendPersistsStructuredVerdicts`: capture repository order and
+  assert the append precedes the next graph request.
 - `UncitedEvidenceBecomesUnknown`: assert no threshold pass is returned.
-- `LoopControllerNeverWritesInitiativeState`: mock only `AttemptLedger` and
-  assert no initiative repository dependency exists.
+- `InboundAgentRoutesNeverWriteInitiativeState`: mock only the ledger and
+  assert no stage or gate repository dependency exists.
 
 `@SpringBootTest` tests:
 
 - `AgentPlatformPropertiesBindAndValidateDefaults`.
 - `GatewayInvocationIdentityIsStoredPerApplicationCall`.
-- `CapabilityLoopReturnsLastDraftAfterProviderFailure`.
+- `InboundCompletionRoutesThroughGovernedGateway`.
+- `CapabilityLoopStateAcceptsOnlyJavaReturnedTerminalOutcome`.
 
 Testcontainers repository tests:
 
@@ -471,21 +521,24 @@ knowledge integration tests.
 ## 11. Acceptance criteria
 
 - [ ] Root module and dependency direction are documented and implemented
-  without an `initiative` dependency in `agentplatform`.
-- [ ] Every provider call uses `LlmGateway.complete`.
+      without an `initiative` dependency in `agentplatform`.
+- [ ] Every provider call from the agent service uses the Java
+      `LlmGateway.complete` route.
 - [ ] Three application attempts and physical gateway retries are distinct.
-- [ ] Every tool call, draft, verdict and refusal is replayable.
+- [ ] Every tool call, draft, verdict and refusal is replayable in Java.
 - [ ] V15/V16 migrations have client-scoped composite keys and append-only
   protections.
 - [ ] Uncited threshold inputs are persisted and resolve `UNKNOWN`.
-- [ ] The controller never writes a gate decision or initiative stage status.
+- [ ] Inbound Java routes never write a gate decision or initiative stage
+      status.
 - [ ] All named unit, Spring and Testcontainers tests pass.
 
 ## 12. Open decisions
 
 - **State history:** use an append-only state-event table in a follow-up
   migration, or permit controlled updates to `capability_loop_state`.
-  Recommendation: append-only state events before production.
+  Recommendation: append-only state events before production; LangGraph
+  checkpoint state remains working memory only.
 - **Observation evidence:** permit only tool-call observations or add a
   dedicated observation table. Recommendation: start with tool-call
   observations and add a table when Python execution is introduced.
