@@ -194,8 +194,9 @@ existing storage primitives, not this policy enforcement.
 Built paths use Java 21, Spring Boot 3.4.5, Spring MVC, JDBC, PostgreSQL,
 pgvector and JSqlParser 4.9. The gateway uses deterministic or OpenAI
 adapters. Testcontainers 1.20.6 and JUnit 5 cover the Java implementation.
-Future bounded loops may use Python 3.12 and optionally LangGraph, but only
-inside a capability loop and through `LlmGateway`.
+New bounded loops use Python and LangGraph only inside a capability graph and
+through the Java `LlmGateway` route. LangGraph plans and iterates; Java
+retains deterministic verdicts, thresholds, persisted state and the ledger.
 
 ## 10. Open questions / risks
 

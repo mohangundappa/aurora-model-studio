@@ -1,22 +1,23 @@
 # Java-Python execution seam
 
 **Status: TO BUILD.** This specification defines the authenticated contract
-between the existing Java application and the proposed Python execution
-services. It does not implement either service, alter the existing gateway or
-move governance decisions into Python. Java remains the authority for
-thresholds, sample-size mathematics, statistical tests, promotion criteria and
-every state transition.
+between the existing Java application, the proposed Python execution services
+and the proposed Python agent service. It does not implement either service,
+alter the existing gateway or move governance decisions into Python. Java
+remains the authority for thresholds, sample-size mathematics, statistical
+tests, promotion criteria, every verdict and every state transition.
 
 Realises [Layer 3 execution capabilities](../layer-3-execution-capabilities.md), part of [the implementation specification index](README.md); prerequisite: [human-gate feature-set binding](human-gate-feature-set-binding.md) and [client adapters](layer-4-client-adapters.md).
 
 ## 1. Scope
 
-Build a Java client and append-only dispatch record for Data & Feature and ML
-execution calls. The seam carries an idempotency key, canonical content hash,
-typed request and typed response, and bounded failure codes. It must make
+Build a Java client and append-only dispatch record for Data & Feature, ML and
+agent-service calls. The seam carries an idempotency key, canonical content
+hash, typed request and typed response, and bounded failure codes. It must make
 Python unavailability visible as a contained stage outcome rather than a
 silent success. The contract also defines a shared canonicalisation fixture
-set that both languages must pass.
+set that both languages must pass. The Python agent direction returns to the
+authenticated Java inbound API specified in [the agent platform runtime](agent-platform-runtime.md).
 
 ## 2. Module and package layout
 
@@ -37,8 +38,10 @@ contracts/feature-set-hash-fixtures.json
 ```
 
 `initiative` already owns stage transitions and depends on the proposed
-`agentplatform`; the Python client belongs in `initiative` because it must
-return to `InitiativeService`. Use Java's `HttpClient`, Jackson and the same
+`agentplatform`; the Python execution client belongs in `initiative` because
+it must return to `InitiativeService`. The Python agent service uses the
+authenticated Java inbound routes rather than a second database or provider
+boundary. Use Java's `HttpClient`, Jackson and the same
 failure-containment pattern as the existing `HttpAuroraCandidateClient`.
 `agentplatform` must not depend on this client.
 
@@ -90,6 +93,12 @@ public enum ExecutionFailure {
   IDEMPOTENCY_KEY_REUSE,
   PYTHON_RESPONSE_INVALID,
   PYTHON_TIMEOUT
+}
+
+public enum PythonService {
+  DATA_FEATURE,
+  ML,
+  AGENT
 }
 ```
 
@@ -218,7 +227,7 @@ create table execution_attempts (
   client_id uuid not null,
   initiative_id uuid not null,
   stage_attempt_id uuid not null,
-  service varchar(40) not null check (service in ('DATA_FEATURE', 'ML')),
+  service varchar(40) not null check (service in ('DATA_FEATURE', 'ML', 'AGENT')),
   phase varchar(20) not null check (phase in ('DISPATCHED', 'RESULT')),
   idempotency_key varchar(200) not null,
   content_hash varchar(64) not null,
@@ -260,6 +269,15 @@ create trigger execution_attempts_append_only
 before update or delete on execution_attempts
 for each row execute function reject_execution_attempt_mutation();
 ```
+
+The `AGENT` service value covers Python bounded capability graphs. Agent
+completion, tool dispatch and ledger append calls use the bidirectional
+authenticated routes in `agent-platform-runtime.md`; they do not grant
+Python database access or verdict authority.
+
+V15 through V19 remain unchanged, and this technology-alignment work
+introduces no migration. The execution-attempt discriminator is documentation
+for the existing V18 contract and now includes `AGENT`.
 
 The first row is the immutable `DISPATCHED` record inserted before the network
 call. The second row is an immutable `RESULT` record inserted after the call

@@ -5,6 +5,12 @@ implements it, or to the explicit gap where no component exists.
 
 [See the detailed layer designs](design/README.md) for implementation contracts and audit detail.
 [See the implementation specifications](design/impl/README.md) for typed build contracts and sequence.
+[See ADR 0002](adr/0002-per-layer-technology.md) for the per-layer technology rule.
+
+Technology mapping: the Layer 0 experience is a React and TypeScript frontend
+TO BUILD; backend governance and persisted state remain Java 21 and Spring
+Boot; new bounded agent graphs are Python with LangGraph, while deterministic
+verdicts and the ledger remain Java-owned.
 
 ## Experience layer
 
