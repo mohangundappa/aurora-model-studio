@@ -1,10 +1,9 @@
 # Implementation specifications
 
 **Status: TO BUILD unless a section explicitly names an existing class or
-table.** These specifications take the detailed layer designs one step closer
-to developer implementation. They cover the Java-side agent runtime and the
-first capability loops; they do not implement Java, SQL, Python, adapters or a
-console.
+table.** These specifications cover all five layers and both cross-cutting
+rails. Specifying a component is not building it: these documents change no
+Java, SQL, Python, template or configuration file.
 
 The governing rule remains: agents gather, interpret and iterate; deterministic
 code owns the verdict. No agent changes a threshold, approves its own work,
@@ -27,7 +26,7 @@ BUILT; proposed symbols, routes and tables are labelled TO BUILD.
 | Feature Agent | [layer-2-feature-agent.md](layer-2-feature-agent.md) | TO BUILD; wraps the existing feature producer and verdicts |
 | Discovery and Reuse Agents | [layer-2-discovery-and-reuse-agents.md](layer-2-discovery-and-reuse-agents.md) | TO BUILD; deterministic recall and scorecard remain BUILT |
 | Advisor Agent | [layer-1-advisor-agent.md](layer-1-advisor-agent.md) | TO BUILD; read-only |
-| Feature-set gate binding | [human-gate-feature-set-binding.md](human-gate-feature-set-binding.md) | TO BUILD; V17 is defined in the Python-side handoff |
+| Feature-set gate binding | [human-gate-feature-set-binding.md](human-gate-feature-set-binding.md) | TO BUILD; V17 DDL is defined in [java-python-seam.md](java-python-seam.md) |
 | Data & Feature Execution Service | [layer-3-data-feature-service.md](layer-3-data-feature-service.md) | TO BUILD; Python service, only client-data access path |
 | ML Execution Service | [layer-3-ml-service.md](layer-3-ml-service.md) | TO BUILD; Python training and evaluation service |
 | Java-Python seam | [java-python-seam.md](java-python-seam.md) | TO BUILD; authenticated dispatch and execution ledger |
@@ -36,13 +35,13 @@ BUILT; proposed symbols, routes and tables are labelled TO BUILD.
 
 ## Migration allocation
 
-| Migration | Allocation | This handoff |
+| Migration | Allocation | Defining specification |
 | --- | --- | --- |
-| `V15__agent_attempt_ledger.sql` | Agent attempts and tool-call records | Define here |
-| `V16__capability_loop_state.sql` | Bounded loop state linked to `initiative_stage_attempts` | Define here |
-| `V17__approved_feature_sets.sql` | Exact versioned approved feature sets | Define here |
-| `V18__execution_attempts.sql` | Python execution attempts | Define here |
-| `V19__client_adapter_bindings.sql` | Client data and ML adapter bindings | Define here |
+| `V15__agent_attempt_ledger.sql` | Agent attempts and tool-call records | [agent-platform-runtime.md](agent-platform-runtime.md) |
+| `V16__capability_loop_state.sql` | Bounded loop state linked to `initiative_stage_attempts` | [agent-platform-runtime.md](agent-platform-runtime.md) |
+| `V17__approved_feature_sets.sql` | Exact versioned approved feature sets | [java-python-seam.md](java-python-seam.md) |
+| `V18__execution_attempts.sql` | Python execution attempts | [java-python-seam.md](java-python-seam.md) |
+| `V19__client_adapter_bindings.sql` | Client data and ML adapter bindings | [layer-4-client-adapters.md](layer-4-client-adapters.md) |
 
 Flyway currently runs from `app/src/main/resources/db/migration`; the
 Java-side implementation must place V15 and V16 there even though their
@@ -82,6 +81,18 @@ blocked: no Java-side loop can truthfully profile warehouse rows, build
 features, train, evaluate or create model artifacts. Java remains the
 authority for thresholds, sample-size mathematics, statistical tests,
 promotion criteria and every state transition after Python is added.
+
+## Design-to-implementation traceability
+
+| Layer or rail | Design document | Implementation specification(s) | Migrations introduced | Build-order step | Current status |
+| --- | --- | --- | --- | ---: | --- |
+| Layer 0 · Experience | [layer-0-experience.md](../layer-0-experience.md) | [layer-0-console.md](layer-0-console.md) | None | 9 | TO BUILD; server-rendered console |
+| Layer 1 · Governed orchestration | [layer-1-orchestration.md](../layer-1-orchestration.md) | [layer-1-advisor-agent.md](layer-1-advisor-agent.md) | None | 4 | BUILT system of record; advisor TO BUILD |
+| Layer 2 · Design capabilities | [layer-2-design-capabilities.md](../layer-2-design-capabilities.md) | [layer-2-targeting-repair-agent.md](layer-2-targeting-repair-agent.md), [layer-2-feature-agent.md](layer-2-feature-agent.md), [layer-2-discovery-and-reuse-agents.md](layer-2-discovery-and-reuse-agents.md) | None | 2–3 | Four of six agent/judge pairs specified; Data Profiling and Experiment Planning remain without specs |
+| Layer 3 · Execution capabilities | [layer-3-execution-capabilities.md](../layer-3-execution-capabilities.md) | [layer-3-data-feature-service.md](layer-3-data-feature-service.md), [layer-3-ml-service.md](layer-3-ml-service.md), [java-python-seam.md](java-python-seam.md) | V18 | 7–8 | TO BUILD; Python execution services |
+| Layer 4 · Foundation | [layer-4-foundation.md](../layer-4-foundation.md) | [layer-4-client-adapters.md](layer-4-client-adapters.md) | V19 | 6 | Enterprise Knowledge BUILT; client adapters TO BUILD |
+| Agent platform rail | [cross-cutting-agent-platform.md](../cross-cutting-agent-platform.md) | [agent-platform-runtime.md](agent-platform-runtime.md) | V15, V16 | 1 | Gateway BUILT; runtime TO BUILD |
+| Human gate rail | [cross-cutting-human-gate.md](../cross-cutting-human-gate.md) | [human-gate-feature-set-binding.md](human-gate-feature-set-binding.md) | V17 (defined in [java-python-seam.md](java-python-seam.md)) | 5 | Gate mechanics BUILT; hash-bound feature-set binding TO BUILD |
 
 ## Cross-links
 

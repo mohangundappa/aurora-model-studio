@@ -4,6 +4,8 @@
 the built orchestration state machine. It cannot run a stage, decide a gate,
 write an event, change an attempt or choose the next stage.
 
+Realises [Layer 1 governed orchestration](../layer-1-orchestration.md), part of [the implementation specification index](README.md).
+
 ## 1. Scope
 
 Build an advisor that reads initiative state, stage attempts, blockers,

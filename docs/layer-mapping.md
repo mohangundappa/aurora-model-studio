@@ -4,6 +4,7 @@ This is a lookup from each diagram box to the Model Studio component that
 implements it, or to the explicit gap where no component exists.
 
 [See the detailed layer designs](design/README.md) for implementation contracts and audit detail.
+[See the implementation specifications](design/impl/README.md) for typed build contracts and sequence.
 
 ## Experience layer
 

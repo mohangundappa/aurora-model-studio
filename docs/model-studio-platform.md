@@ -2,6 +2,7 @@
 
 [See the box-by-box layer mapping](layer-mapping.md) for the terse implementation and gap lookup.
 [See the detailed layer designs](design/README.md) for implementation contracts and audit detail.
+[See the implementation specifications](design/impl/README.md) for typed build contracts and sequence.
 
 This document is the platform map for Aurora Model Studio. It uses the same
 layer names and lifecycle vocabulary as the conceptual model, but every

@@ -184,3 +184,14 @@ interfaces; they must not move governance into provider-specific code.
 - The economic boundary is deliberate: governed knowledge is ours and compounds
   across initiatives; adapter connections belong to the client's estate and do
   not compound.
+
+## 11. Implementation specifications
+
+| Component | Implementation specification | What the specification adds |
+| --- | --- | --- |
+| Client data and ML adapters | [Client adapters](impl/layer-4-client-adapters.md) | Typed protocols, capability probes, client-scoped bindings, enforced limits and refusal codes |
+
+Enterprise Knowledge is BUILT and has no implementation specification because
+its current Java modules, tables and migrations are the implemented foundation
+described by this layer. Provider-specific credential storage and capability
+caching remain deployment decisions outside the adapter contract.

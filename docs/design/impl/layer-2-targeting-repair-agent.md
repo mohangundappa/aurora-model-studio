@@ -4,6 +4,8 @@
 `InitiativeService.finishTargeting` call. This specification turns it into a
 bounded repair loop while retaining the existing deterministic SQL judge.
 
+Realises [Layer 2 design capabilities](../layer-2-design-capabilities.md), part of [the implementation specification index](README.md); prerequisite: [agent platform runtime](agent-platform-runtime.md).
+
 ## 1. Scope
 
 Build a Targeting Repair Agent that reads governed data-asset and lineage

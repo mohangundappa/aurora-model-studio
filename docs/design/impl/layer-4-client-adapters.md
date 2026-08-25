@@ -7,6 +7,8 @@ promotion outcome or initiative transition. Java remains the authority for
 thresholds, sample-size mathematics, statistical tests, promotion criteria and
 every state transition.
 
+Realises [Layer 4 foundation](../layer-4-foundation.md), part of [the implementation specification index](README.md); prerequisite: [human-gate feature-set binding](human-gate-feature-set-binding.md).
+
 ## 1. Scope
 
 Define `ClientDataAdapter` and `ClientMlAdapter`, capability probing,

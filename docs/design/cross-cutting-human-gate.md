@@ -158,3 +158,14 @@ policy.
   caller.
 - The exact UI evidence and acknowledgement contract is not yet defined.
 - Layer 3 needs cross-language tests proving the approved hash is preserved.
+
+## 11. Implementation specifications
+
+| Component | Implementation specification | What the specification adds |
+| --- | --- | --- |
+| Feature-set approval binding | [Human-gate feature-set binding](impl/human-gate-feature-set-binding.md) | Exact version and canonical hash binding, mismatch refusal and unknown-check interaction |
+
+The authentication provider and the final UI evidence presentation have no
+implementation specification yet. The binding spec covers the hash-bound
+approval contract while identity authentication and presentation remain open
+integration decisions.

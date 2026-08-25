@@ -6,6 +6,8 @@ recommendations and artifact references. Java remains the authority for
 thresholds, sample-size mathematics, statistical tests, promotion criteria and
 every state transition.
 
+Realises [Layer 3 execution capabilities](../layer-3-execution-capabilities.md), part of [the implementation specification index](README.md); prerequisite: [human-gate feature-set binding](human-gate-feature-set-binding.md), [client adapters](layer-4-client-adapters.md) and [the data and feature service](layer-3-data-feature-service.md).
+
 ## 1. Scope
 
 Build the bounded ML execution service for candidate algorithm runs, tuning,

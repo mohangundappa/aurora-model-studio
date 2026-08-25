@@ -5,6 +5,8 @@ one-shot gateway call followed by `featureVerdicts`. This specification adds a
 bounded feature loop and extracts the deterministic judge without changing
 its authority.
 
+Realises [Layer 2 design capabilities](../layer-2-design-capabilities.md), part of [the implementation specification index](README.md); prerequisite: [agent platform runtime](agent-platform-runtime.md).
+
 ## 1. Scope
 
 Build a Feature Agent that searches governed metadata, detects exact governed

@@ -6,6 +6,8 @@ This specification adds requirement interpretation, clarification questions
 and evidence gathering without allowing an agent to change recall, weights,
 dimensions or thresholds.
 
+Realises [Layer 2 design capabilities](../layer-2-design-capabilities.md), part of [the implementation specification index](README.md); prerequisite: [agent platform runtime](agent-platform-runtime.md).
+
 ## 1. Scope
 
 The Discovery Agent interprets a requirement, identifies missing information,

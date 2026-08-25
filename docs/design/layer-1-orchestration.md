@@ -188,3 +188,14 @@ invariants.
 - Duration records are operational history, not a metrics or tracing backend.
 - Retry races are protected by unique keys but need a stronger lock if traffic
   grows.
+
+## 11. Implementation specifications
+
+| Component | Implementation specification | What the specification adds |
+| --- | --- | --- |
+| Advisor Agent | [Layer 1 Advisor Agent](impl/layer-1-advisor-agent.md) | Read-only diagnosis, recommendations, repository separation and no-write tests |
+
+SSO-backed actor authentication, telemetry projections and history pagination
+have no implementation specification yet. They remain open platform concerns
+because the current layer provides caller-asserted actors and append-only
+operational records rather than those services.
