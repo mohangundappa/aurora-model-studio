@@ -168,3 +168,14 @@ LangGraph, while deterministic judges remain in Java.
 - Prompt hashes prove identity, not semantic correctness.
 - Provider retries can create multiple physical calls for one application
   call site and must remain visible in the ledger.
+
+## 11. Implementation specifications
+
+| Component | Implementation specification | What the specification adds |
+| --- | --- | --- |
+| Agent platform runtime | [Agent platform runtime](impl/agent-platform-runtime.md) | Typed tools, bounded loops, append-only attempt records and citation enforcement |
+
+Provider-specific tool implementations and the final retention policy have no
+separate implementation specification yet. The runtime spec defines the
+governance boundary and persistence contracts while those deployment details
+remain undecided.

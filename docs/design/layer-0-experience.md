@@ -137,3 +137,13 @@ but it must call the HTTP API and must not duplicate the workflow state machine.
 - Should the read model be a SQL view, a projection table, or an API assembler?
 - Large initiative histories may need pagination without changing append-only
   records.
+
+## 11. Implementation specifications
+
+| Component | Implementation specification | What the specification adds |
+| --- | --- | --- |
+| Initiative workspace | [Layer 0 console](impl/layer-0-console.md) | Server-rendered views, typed read/write contracts, scope propagation and refusal behaviour |
+
+The conversational assistant interaction and any separate frontend do not have
+an implementation specification yet. The console spec covers the server-rendered
+workspace, while the assistant interaction remains a future experience decision.

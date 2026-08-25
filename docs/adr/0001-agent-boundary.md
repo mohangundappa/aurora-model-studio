@@ -1,6 +1,7 @@
 # ADR 0001: Where AI agents fit, and where they must not
 
 [See the detailed layer designs](../design/README.md) for implementation contracts and audit detail.
+[See the implementation specifications](../design/impl/README.md) for typed build contracts and sequence.
 
 - Status: accepted
 - Scope: Model Studio capability layers and their technology stack

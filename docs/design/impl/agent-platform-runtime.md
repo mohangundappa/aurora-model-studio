@@ -6,6 +6,8 @@ capability loops, attempt persistence and evidence-citation enforcement. It
 does not add a new provider boundary, workflow state machine, validator
 threshold, human approval path or Python execution service.
 
+Realises [the agent platform rail](../cross-cutting-agent-platform.md), part of [the implementation specification index](README.md).
+
 ## 1. Scope
 
 Build typed tool dispatch, a fixed-budget loop controller, append-only attempt

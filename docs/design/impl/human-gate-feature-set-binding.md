@@ -5,6 +5,8 @@ actor, reason and accepted unknown checks. This specification adds the
 versioned feature-set binding required before Layer 3 can use an approved set.
 It does not implement Python execution, client adapters or model training.
 
+Realises [the human gate rail](../cross-cutting-human-gate.md), part of [the implementation specification index](README.md).
+
 ## 1. Scope
 
 Extend the gate contract so an approval names an exact immutable feature-set

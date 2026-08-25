@@ -203,3 +203,17 @@ workflow, hashes, thresholds, sample-size and promotion policy.
 - Artifact retention and MLflow tenancy need governance.
 - “Only place client data is touched” depends on adapters not bypassing this
   service.
+
+## 11. Implementation specifications
+
+| Component | Implementation specification | What the specification adds |
+| --- | --- | --- |
+| Data and Feature Execution Service | [Data and Feature Execution Service](impl/layer-3-data-feature-service.md) | Hash verification, bounded cohort and feature execution, idempotency and Python refusal contracts |
+| ML Execution Service | [ML Execution Service](impl/layer-3-ml-service.md) | Approved-set-only training, evaluation observations, artifact references and MLflow integration |
+| Java-Python seam | [Java-Python execution seam](impl/java-python-seam.md) | Authenticated dispatch, V18 attempt records, replay semantics and cross-language hash fixtures |
+
+No separate implementation specification covers provider deployment,
+artifact-retention governance or Java's deterministic acceptance and promotion
+judges; those remain deployment and existing Java orchestration concerns. The
+execution specifications depend on the approved feature-set contract and the
+adapter boundary before client data or ML platforms are accessed.

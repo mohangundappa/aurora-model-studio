@@ -203,3 +203,19 @@ inside a capability loop and through `LlmGateway`.
 - Data Discovery cannot observe rows until Layer 3 supplies a warehouse seam.
 - Experiment planning is present, but execution and evaluation are absent.
 - String-based leakage checks may miss semantically equivalent spellings.
+
+## 11. Implementation specifications
+
+| Component | Implementation specification | What the specification adds |
+| --- | --- | --- |
+| Targeting Repair Agent | [Targeting Repair Agent](impl/layer-2-targeting-repair-agent.md) | Bounded repair attempts around the deterministic SQL judge |
+| Feature Agent | [Feature Agent](impl/layer-2-feature-agent.md) | Governed duplicate detection, bounded repair and extracted feature judging |
+| Discovery and Reuse Agents | [Discovery and Reuse Agents](impl/layer-2-discovery-and-reuse-agents.md) | Clarification questions and cited reuse evidence gathering |
+
+Of the six agent/judge pairs in this layer, Data Profiling and Experiment
+Planning have no implementation specification yet. Data Profiling needs the
+Python data service and client data adapters before an agent has anything to
+observe; Experiment Planning needs the ML service before a run can be launched
+or compared. The prerequisites are specified in [Layer 3 execution
+services](impl/layer-3-data-feature-service.md), [the ML service](impl/layer-3-ml-service.md)
+and [client adapters](impl/layer-4-client-adapters.md).

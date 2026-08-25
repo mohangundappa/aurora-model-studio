@@ -6,6 +6,8 @@ module. It is a view over the Java orchestrator, not a workflow engine. Java
 remains the authority for thresholds, human decisions and every state
 transition.
 
+Realises [Layer 0 experience](../layer-0-experience.md), part of [the implementation specification index](README.md).
+
 ## 1. Scope
 
 Build a single initiative workspace for a Model Developer or Data Scientist:
