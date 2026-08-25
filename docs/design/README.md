@@ -17,7 +17,7 @@ The structural rule from the architecture diagram is:
 ## Layers
 
 | Layer | Design | Implementation specifications | Current status |
-| --- | --- | --- |
+| --- | --- | --- | --- |
 | 0 · Experience | [Experience](layer-0-experience.md) | [Layer 0 console](impl/layer-0-console.md) | TO BUILD; conversational, not a form |
 | 1 · Governed orchestration | [Governed orchestration](layer-1-orchestration.md) | [Advisor Agent](impl/layer-1-advisor-agent.md) | BUILT; system of record; advisor TO BUILD |
 | 2 · Design capabilities | [Design capabilities](layer-2-design-capabilities.md) | [Targeting](impl/layer-2-targeting-repair-agent.md), [Feature](impl/layer-2-feature-agent.md), [Discovery and Reuse](impl/layer-2-discovery-and-reuse-agents.md) | Agent/judge pairs; one-shot paths BUILT, loops TO BUILD |
@@ -27,7 +27,7 @@ The structural rule from the architecture diagram is:
 ## Cross-cutting rails
 
 | Rail | Design | Implementation specifications | Current status |
-| --- | --- | --- |
+| --- | --- | --- | --- |
 | Agent platform | [Agent platform](cross-cutting-agent-platform.md) | [Agent platform runtime](impl/agent-platform-runtime.md) | Gateway BUILT; tools, loops, ledger and evidence rule TO BUILD |
 | Human gate | [Human gate](cross-cutting-human-gate.md) | [Feature-set binding](impl/human-gate-feature-set-binding.md) | Built mechanics; Layer 3 hash-bound feature-set gate TO BUILD |
 
@@ -41,9 +41,9 @@ TO BUILD contracts are proposals, not existing routes or tables.
 ## Reading path to implementation
 
 Start with the [platform map](../model-studio-platform.md) for system boundaries
-and responsibilities. Read the [layer design](layer-0-experience.md) or the
-relevant layer and rail design for what the capability is and why it belongs
-there. Follow its implementation specification for what to type, including
+and responsibilities. Read the relevant layer or rail design from the tables
+above for what the capability is and why it belongs there. Follow its
+implementation specification for what to type, including
 interfaces, schemas, behaviour and tests. Use the [implementation build
 order](impl/README.md#build-order) to sequence the work and its prerequisites.
 
