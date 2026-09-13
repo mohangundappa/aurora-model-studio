@@ -87,13 +87,21 @@ public class KnowledgeRepository implements KnowledgeIngestion, KnowledgeSearchI
         .findFirst();
   }
 
-  public boolean hasEvidence(String key, String sourceVersion) {
-    return jdbc.queryForObject(
-        "select exists(select 1 from knowledge_evidence e join knowledge_objects o on o.client_id=e.client_id and o.id=e.knowledge_object_id where e.client_id=? and o.knowledge_key=? and e.source_version=?)",
-        Boolean.class,
-        ClientContext.require(),
-        key,
-        sourceVersion);
+  public Optional<KnowledgeObject> findBySourceVersion(
+      String key, String sourceSystem, String sourceVersion) {
+    return jdbc
+        .query(
+            "select o.* from knowledge_objects o where o.client_id=? and o.knowledge_key=? "
+                + "and exists(select 1 from knowledge_evidence e where e.client_id=o.client_id "
+                + "and e.knowledge_object_id=o.id and e.source_system=? and e.source_version=?) "
+                + "order by o.version desc limit 1",
+            this::map,
+            ClientContext.require(),
+            key,
+            sourceSystem,
+            sourceVersion)
+        .stream()
+        .findFirst();
   }
 
   public Optional<KnowledgeObject> findApproved(String key) {

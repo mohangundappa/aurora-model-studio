@@ -6,7 +6,8 @@ import java.util.Optional;
 public interface KnowledgeIngestion {
   Optional<KnowledgeObject> findLatest(String key);
 
-  boolean hasEvidence(String key, String sourceVersion);
+  Optional<KnowledgeObject> findBySourceVersion(
+      String key, String sourceSystem, String sourceVersion);
 
   void saveFieldProvenance(FieldProvenance field);
 }

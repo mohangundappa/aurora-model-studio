@@ -58,7 +58,9 @@ Consumers choose a contract by capability:
   the current client context, inserts an edge idempotently, and runs in a
   transaction. `relatedObjectIds` returns outgoing edges of the requested type.
 - `KnowledgeIngestion` provides latest-version lookup, source-version
-  deduplication and field provenance for importer/extraction.
+  deduplication and field provenance for importer/extraction. `findBySourceVersion`
+  resolves the object owning evidence for the current tenant, source system and
+  source version, so a repeated import retains its original relationship endpoints.
 - `KnowledgeSearchIndex` provides discovery recall and embedding persistence.
   It does not expose lifecycle mutation.
 - `KnowledgeEmbeddingWriter` is the callback implemented by discovery for
