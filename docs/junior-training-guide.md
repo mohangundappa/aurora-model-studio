@@ -162,9 +162,9 @@ cp -R app/src/test/resources/aurora-fixture "$SOURCE"
 cat > "$SOURCE/app/src/main/resources/db/migration/V1__initial_schema.sql" <<'SQL'
 create table raw_events(
   event_id uuid primary key,
-  session_id uuid,
-  event_time timestamp,
-  event_name text
+  session_id uuid not null,
+  event_time timestamp not null,
+  event_name text not null
 );
 create table derived_signals(id uuid);
 create table decisions(id uuid);
@@ -172,6 +172,10 @@ create table experiment_exposures(id uuid);
 create table experiment_outcomes(id uuid);
 SQL
 ```
+
+Keep the explicit column constraints in this fixture. The current importer
+recognizes these column declarations with their constraints; omitting them can
+leave columns out of the governed metadata and block targeting design.
 
 All workshop source content is fictional. The ordinary importer/extractor route
 can report `synthetic=false` for this fixture; that flag alone does not establish
