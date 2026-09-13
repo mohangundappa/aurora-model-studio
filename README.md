@@ -40,6 +40,9 @@ self-declared and unverified. Aurora Hotels is fictional.
 [Module architecture](docs/module-architecture.md) describes dependency boundaries, knowledge contracts and initiative components.
 [Agent boundary ADR](docs/adr/0001-agent-boundary.md) describes where AI agents fit and where verdicts stay deterministic.
 
+[Use-case guide](docs/use-cases.md) explains the problems the application solves, the team roles, and the supported outcomes.
+[Junior training guide](docs/junior-training-guide.md) provides an instructor agenda, isolated API/CLI labs, troubleshooting, and an assessment.
+
 Aurora Intelligence is the separate runtime that turns events into signals,
 context, decisions, experiments, and measured value. The two products meet
 through the live HTTP handoff described in the
