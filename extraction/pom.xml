@@ -7,6 +7,7 @@
   </parent>
   <artifactId>extraction</artifactId>
   <dependencies>
+    <dependency><groupId>com.aurora.studio</groupId><artifactId>common</artifactId><version>${project.version}</version></dependency>
     <dependency><groupId>com.aurora.studio</groupId><artifactId>gateway</artifactId><version>${project.version}</version></dependency>
     <dependency><groupId>com.aurora.studio</groupId><artifactId>knowledge</artifactId><version>${project.version}</version></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-jdbc</artifactId></dependency>

@@ -11,7 +11,7 @@ import com.aurora.studio.knowledge.KnowledgeEvidence;
 import com.aurora.studio.knowledge.KnowledgeObject;
 import com.aurora.studio.knowledge.KnowledgePackage;
 import com.aurora.studio.knowledge.KnowledgeRelationship;
-import com.aurora.studio.knowledge.KnowledgeRepository;
+import com.aurora.studio.knowledge.KnowledgeSearchIndex;
 import com.aurora.studio.knowledge.KnowledgeService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
@@ -48,7 +48,7 @@ public class DiscoveryService {
           Map.of("explanation", Map.of("type", "string")));
 
   private final KnowledgeService knowledge;
-  private final KnowledgeRepository knowledgeRepository;
+  private final KnowledgeSearchIndex knowledgeIndex;
   private final DiscoveryRepository repository;
   private final EmbeddingProvider embeddings;
   private final LlmGateway gateway;
@@ -57,32 +57,25 @@ public class DiscoveryService {
 
   public DiscoveryService(
       KnowledgeService knowledge,
-      KnowledgeRepository knowledgeRepository,
+      KnowledgeSearchIndex knowledgeIndex,
       DiscoveryRepository repository,
       EmbeddingProvider embeddings,
       LlmGateway gateway,
       DiscoveryWeights weights) {
-    this(
-        knowledge,
-        knowledgeRepository,
-        repository,
-        embeddings,
-        gateway,
-        weights,
-        new ObjectMapper());
+    this(knowledge, knowledgeIndex, repository, embeddings, gateway, weights, new ObjectMapper());
   }
 
   @Autowired
   public DiscoveryService(
       KnowledgeService knowledge,
-      KnowledgeRepository knowledgeRepository,
+      KnowledgeSearchIndex knowledgeIndex,
       DiscoveryRepository repository,
       EmbeddingProvider embeddings,
       LlmGateway gateway,
       DiscoveryWeights weights,
       ObjectMapper mapper) {
     this.knowledge = knowledge;
-    this.knowledgeRepository = knowledgeRepository;
+    this.knowledgeIndex = knowledgeIndex;
     this.repository = repository;
     this.embeddings = embeddings;
     this.gateway = gateway;
@@ -117,7 +110,7 @@ public class DiscoveryService {
         knowledge.search(null, null, null, null, null, null, includeCandidates);
     Embedding requestEmbedding = embeddings.embed(requirementText(requirement));
     List<KnowledgeObject> recalled =
-        knowledgeRepository.discoveryRecall(
+        knowledgeIndex.discoveryRecall(
             requestEmbedding.vector(),
             requirementText(requirement),
             requestEmbedding.provider(),
@@ -183,7 +176,7 @@ public class DiscoveryService {
         knowledge.search(null, null, null, null, null, null, includeCandidates);
     for (KnowledgeObject object : objects) {
       Embedding embedding = embeddings.embed(searchText(object));
-      knowledgeRepository.updateEmbedding(object.id(), embedding.vector(), embedding.provider());
+      knowledgeIndex.updateEmbedding(object.id(), embedding.vector(), embedding.provider());
     }
     return objects.size();
   }
