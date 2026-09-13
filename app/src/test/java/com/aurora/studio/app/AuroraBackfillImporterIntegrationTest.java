@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.aurora.studio.common.ClientContext;
 import com.aurora.studio.extraction.ExtractionService;
 import com.aurora.studio.importer.AuroraBackfillImporter;
+import com.aurora.studio.knowledge.KnowledgeIngestion;
+import com.aurora.studio.knowledge.KnowledgeObject;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,6 +42,7 @@ class AuroraBackfillImporterIntegrationTest {
 
   @Autowired AuroraBackfillImporter importer;
   @Autowired ExtractionService extraction;
+  @Autowired KnowledgeIngestion ingestion;
   @Autowired JdbcTemplate jdbc;
 
   @DynamicPropertySource
@@ -179,6 +182,120 @@ class AuroraBackfillImporterIntegrationTest {
   private int countObjects() {
     return jdbc.queryForObject(
         "select count(*) from knowledge_objects where client_id=?", Integer.class, CLIENT);
+  }
+
+  @Test
+  void combinedImportAndExtractionPreserveRelationshipsOnRepeat(@TempDir Path temp)
+      throws Exception {
+    Path fixture = copyFixture(temp);
+    importer.importRepository(fixture);
+    extractFixture(fixture);
+    int objects = countObjects();
+    var evidence =
+        jdbc.queryForList("select * from knowledge_evidence where client_id=? order by id", CLIENT);
+    var relationships =
+        jdbc.queryForList(
+            "select * from knowledge_relationships where client_id=? order by id", CLIENT);
+    assertThat(objects).isEqualTo(19);
+    assertThat(relationships).hasSize(4);
+
+    for (int run = 0; run < 2; run++) {
+      assertThat(importer.importRepository(fixture).counts()).isEmpty();
+      assertThat(extractFixture(fixture).candidateIds()).isEmpty();
+      assertThat(countObjects()).isEqualTo(objects);
+      assertThat(
+              jdbc.queryForList(
+                  "select * from knowledge_evidence where client_id=? order by id", CLIENT))
+          .isEqualTo(evidence);
+      assertThat(
+              jdbc.queryForList(
+                  "select * from knowledge_relationships where client_id=? order by id", CLIENT))
+          .isEqualTo(relationships);
+    }
+  }
+
+  private ExtractionService.ExtractionRun extractFixture(Path fixture) throws Exception {
+    ClientContext.set(CLIENT);
+    try {
+      return extraction.extract(fixture, false);
+    } finally {
+      ClientContext.clear();
+    }
+  }
+
+  @Test
+  void evidenceLookupMatchesClientSourceAndVersion(@TempDir Path temp) throws Exception {
+    Path fixture = copyFixture(temp);
+    importer.importRepository(fixture);
+    extractFixture(fixture);
+    String key = "feature:booking-intent";
+    String sourceVersion =
+        jdbc.queryForObject(
+            "select e.source_version from knowledge_evidence e join knowledge_objects o "
+                + "on o.client_id=e.client_id and o.id=e.knowledge_object_id "
+                + "where o.client_id=? and o.knowledge_key=? and o.version=1",
+            String.class,
+            CLIENT,
+            key);
+    ClientContext.set(CLIENT);
+    assertThat(ingestion.findLatest(key).map(KnowledgeObject::version)).contains(2);
+    assertThat(
+            ingestion
+                .findBySourceVersion(key, "aurora-intelligence", sourceVersion)
+                .map(KnowledgeObject::version))
+        .contains(1);
+    assertThat(
+            ingestion
+                .findBySourceVersion(key, "aurora-estate", sourceVersion)
+                .map(KnowledgeObject::version))
+        .contains(2);
+    assertThat(ingestion.findBySourceVersion(key, "other-source", sourceVersion)).isEmpty();
+    assertThat(ingestion.findBySourceVersion(key, "aurora-intelligence", "missing-version"))
+        .isEmpty();
+    assertThat(ingestion.findBySourceVersion("missing-key", "aurora-intelligence", sourceVersion))
+        .isEmpty();
+    ClientContext.set(UUID.fromString("00000000-0000-0000-0000-000000000002"));
+    assertThat(ingestion.findBySourceVersion(key, "aurora-intelligence", sourceVersion)).isEmpty();
+  }
+
+  @Test
+  void changedAndRevertedSourcesPreserveImportedVersions(@TempDir Path temp) throws Exception {
+    Path fixture = copyFixture(temp);
+    Path signal = fixture.resolve("signals/src/main/resources/signals/booking-intent.yaml");
+    String original = Files.readString(signal);
+    importer.importRepository(fixture);
+    extractFixture(fixture);
+    Files.writeString(signal, original.replace("Recent booking intent", "Updated booking intent"));
+    assertThat(importer.importRepository(fixture).counts())
+        .containsExactly(Map.entry("FEATURE", 1));
+    assertThat(extractFixture(fixture).counts()).containsExactly(Map.entry("FEATURE", 1));
+    var relationships =
+        jdbc.queryForList(
+            "select * from knowledge_relationships where client_id=? order by id", CLIENT);
+    var versions =
+        jdbc.queryForList(
+            "select id,version from knowledge_objects where client_id=? and knowledge_key=? order by version",
+            CLIENT,
+            "feature:booking-intent");
+    assertThat(versions).hasSize(4);
+    assertThat(importer.importRepository(fixture).counts()).isEmpty();
+    assertThat(extractFixture(fixture).candidateIds()).isEmpty();
+    assertThat(
+            jdbc.queryForList(
+                "select * from knowledge_relationships where client_id=? order by id", CLIENT))
+        .isEqualTo(relationships);
+    Files.writeString(signal, original);
+    assertThat(importer.importRepository(fixture).counts()).isEmpty();
+    assertThat(
+            jdbc.queryForList(
+                "select * from knowledge_relationships where client_id=? order by id", CLIENT))
+        .isEqualTo(relationships);
+    assertThat(
+            jdbc.queryForList(
+                "select id,version from knowledge_objects where client_id=? and knowledge_key=? order by version",
+                CLIENT,
+                "feature:booking-intent"))
+        .isEqualTo(versions);
   }
 
   private Path copyFixture(Path temp) throws Exception {

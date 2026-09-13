@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -371,7 +372,9 @@ public class AuroraBackfillImporter {
       Map<String, Integer> counts)
       throws IOException {
     String evidenceVersion = currentCommit(root) + ":" + sourceVersion;
-    if (ingestion.hasEvidence(key, evidenceVersion)) return ingestion.findLatest(key).orElse(null);
+    Optional<KnowledgeObject> existing =
+        ingestion.findBySourceVersion(key, "aurora-intelligence", evidenceVersion);
+    if (existing.isPresent()) return existing.get();
     KnowledgeObject object =
         service.create(
             new KnowledgeService.Draft(
