@@ -6,6 +6,7 @@ implements it, or to the explicit gap where no component exists.
 [See the detailed layer designs](design/README.md) for implementation contracts and audit detail.
 [See the implementation specifications](design/impl/README.md) for typed build contracts and sequence.
 [See ADR 0002](adr/0002-per-layer-technology.md) for the per-layer technology rule.
+[See the module architecture](module-architecture.md) for code boundaries and dependency checks.
 
 Technology mapping: the Layer 0 experience is a React and TypeScript frontend
 TO BUILD; backend governance and persisted state remain Java 21 and Spring
@@ -22,7 +23,7 @@ verdicts and the ledger remain Java-owned.
 
 | Diagram element | Status | Implementing component | Note |
 | --- | --- | --- | --- |
-| Initiative | Built | `InitiativeController`, `InitiativeService` | `POST /api/initiatives` and initiative reads |
+| Initiative | Built | `InitiativeController`, `InitiativeService`, `InitiativeQueries` | `POST /api/initiatives` and initiative reads |
 | Workflow | Built | `InitiativeService`, `InitiativeStage`, `StageStatus`, `initiative_stage_attempts` | Enforces stage predecessors and records attempts |
 | Approvals | Built | `InitiativeService.decide`, `initiative_gate_decisions` | `APPROVE`, `REJECT`, or `RETURN`; named actor and non-empty reason; append-only records |
 | Guided autonomy | Partial | `InitiativeService.runStage` | Bounded stage producers stop at deterministic checks and human gates |
@@ -34,10 +35,10 @@ verdicts and the ledger remain Java-owned.
 | --- | --- | --- | --- |
 | Model Discovery | Built | `DiscoveryController`, `DiscoveryService` | `POST /api/discovery/requirements`, `POST /api/discovery/runs`, and run reads |
 | Reuse Intelligence | Built | `DiscoveryService.clearsReuse`, `REUSE_THRESHOLD` | Six gated dimensions must each reach `0.80` |
-| Data Discovery | Partial | `InitiativeService`, `KnowledgeService`, `DATA_ASSET` | Feasibility over declared metadata; no warehouse connection or profiling |
-| Targeting Design | Built | `InitiativeService`, `LlmGateway`, `SqlDesignValidator` | LLM drafts; deterministic SQL validation decides acceptance |
-| Feature Intelligence | Built | `InitiativeService`, `LlmGateway` | LLM drafts; deterministic feature validation follows |
-| Experimentation | Partial | `InitiativeService` | Designs variants, sample size, and decision rule; never executes or evaluates |
+| Data Discovery | Partial | `FeasibilityStage`, `InitiativeKnowledge`, `KnowledgeService`, `DATA_ASSET` | Feasibility over declared metadata; no warehouse connection or profiling |
+| Targeting Design | Built | `GeneratedDesignStage`, `LlmGateway`, `SqlDesignValidator` | LLM drafts; deterministic SQL validation decides acceptance |
+| Feature Intelligence | Built | `GeneratedDesignStage`, `LlmGateway` | LLM drafts; deterministic feature validation follows |
+| Experimentation | Partial | `ExperimentDesignStage` | Designs variants, sample size, and decision rule; never executes or evaluates |
 
 ## Enterprise Knowledge
 
@@ -65,7 +66,7 @@ verdicts and the ledger remain Java-owned.
 | Client Data Platform Adapters — Athena / Snowflake / Databricks / Spark | Not built | None | No client data-platform execution |
 | Client ML Platform Adapters — SageMaker / Databricks / Azure ML / Vertex | Not built | None | No client ML-platform execution |
 | Inbound source-artifact reader | Built | `AuroraBackfillImporter`, `StructuralParser` | Reads a configured source checkout in place |
-| Outbound candidate-registration client | Built | `AuroraCandidateClient`, `HttpAuroraCandidateClient` | Posts a content-hashed package to a configured runtime platform |
+| Outbound candidate-registration client | Built | `HandoffStage`, `AuroraCandidateClient`, `HttpAuroraCandidateClient` | Posts a content-hashed package to a configured runtime platform |
 
 ## Lifecycle mapping
 

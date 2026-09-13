@@ -1,0 +1,12 @@
+package com.aurora.studio.knowledge;
+
+import java.util.Optional;
+
+/** Tenant-scoped deduplication and provenance for source ingestion. */
+public interface KnowledgeIngestion {
+  Optional<KnowledgeObject> findLatest(String key);
+
+  boolean hasEvidence(String key, String sourceVersion);
+
+  void saveFieldProvenance(FieldProvenance field);
+}

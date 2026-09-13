@@ -2,8 +2,9 @@ package com.aurora.studio.importer;
 
 import com.aurora.studio.common.ClientContext;
 import com.aurora.studio.common.KnowledgeType;
+import com.aurora.studio.common.RelationshipType;
+import com.aurora.studio.knowledge.KnowledgeIngestion;
 import com.aurora.studio.knowledge.KnowledgeObject;
-import com.aurora.studio.knowledge.KnowledgeRepository;
 import com.aurora.studio.knowledge.KnowledgeService;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -17,7 +18,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.yaml.snakeyaml.Yaml;
 
@@ -25,15 +25,12 @@ import org.yaml.snakeyaml.Yaml;
 public class AuroraBackfillImporter {
   public static final UUID IMPORT_CLIENT = UUID.fromString("00000000-0000-0000-0000-000000000001");
   private final KnowledgeService service;
-  private final KnowledgeRepository repository;
-  private final JdbcTemplate jdbc;
+  private final KnowledgeIngestion ingestion;
   private final Yaml yaml = new Yaml();
 
-  public AuroraBackfillImporter(
-      KnowledgeService service, KnowledgeRepository repository, JdbcTemplate jdbc) {
+  public AuroraBackfillImporter(KnowledgeService service, KnowledgeIngestion ingestion) {
     this.service = service;
-    this.repository = repository;
-    this.jdbc = jdbc;
+    this.ingestion = ingestion;
   }
 
   public ImportResult importRepository(Path root) throws IOException {
@@ -113,12 +110,7 @@ public class AuroraBackfillImporter {
                 root,
                 counts);
         if (implementation != null) {
-          jdbc.update(
-              "insert into knowledge_relationships(client_id,from_object_id,relationship_type,to_object_id) values(?,?,?,?) on conflict do nothing",
-              IMPORT_CLIENT,
-              objects.get(name),
-              "IMPLEMENTED_BY",
-              implementation.id());
+          service.link(objects.get(name), RelationshipType.IMPLEMENTED_BY, implementation.id());
         }
       }
       importModels(root, objects, counts);
@@ -170,35 +162,13 @@ public class AuroraBackfillImporter {
         boolean linked = false;
         for (String feature : features.keySet()) {
           if (matcher.group(2).contains(feature)) {
-            jdbc.update(
-                "insert into knowledge_relationships(client_id,from_object_id,relationship_type,to_object_id) values(?,?,?,?) on conflict do nothing",
-                IMPORT_CLIENT,
-                model.id(),
-                "USES",
-                features.get(feature));
-            for (UUID implementationId :
-                jdbc.queryForList(
-                    "select to_object_id from knowledge_relationships where client_id=? and from_object_id=? and relationship_type='IMPLEMENTED_BY'",
-                    UUID.class,
-                    IMPORT_CLIENT,
-                    features.get(feature))) {
-              jdbc.update(
-                  "insert into knowledge_relationships(client_id,from_object_id,relationship_type,to_object_id) values(?,?,?,?) on conflict do nothing",
-                  IMPORT_CLIENT,
-                  model.id(),
-                  "IMPLEMENTED_BY",
-                  implementationId);
-            }
+            service.link(model.id(), RelationshipType.USES, features.get(feature));
+            linkImplementations(model.id(), features.get(feature));
             linked = true;
           }
         }
         if (!linked && features.containsKey("booking-intent")) {
-          jdbc.update(
-              "insert into knowledge_relationships(client_id,from_object_id,relationship_type,to_object_id) values(?,?,?,?) on conflict do nothing",
-              IMPORT_CLIENT,
-              model.id(),
-              "USES",
-              features.get("booking-intent"));
+          service.link(model.id(), RelationshipType.USES, features.get("booking-intent"));
           linkImplementations(model.id(), features.get("booking-intent"));
         }
       }
@@ -207,17 +177,8 @@ public class AuroraBackfillImporter {
 
   private void linkImplementations(UUID modelId, UUID featureId) {
     for (UUID implementationId :
-        jdbc.queryForList(
-            "select to_object_id from knowledge_relationships where client_id=? and from_object_id=? and relationship_type='IMPLEMENTED_BY'",
-            UUID.class,
-            IMPORT_CLIENT,
-            featureId)) {
-      jdbc.update(
-          "insert into knowledge_relationships(client_id,from_object_id,relationship_type,to_object_id) values(?,?,?,?) on conflict do nothing",
-          IMPORT_CLIENT,
-          modelId,
-          "IMPLEMENTED_BY",
-          implementationId);
+        service.relatedObjectIds(featureId, RelationshipType.IMPLEMENTED_BY)) {
+      service.link(modelId, RelationshipType.IMPLEMENTED_BY, implementationId);
     }
   }
 
@@ -410,14 +371,7 @@ public class AuroraBackfillImporter {
       Map<String, Integer> counts)
       throws IOException {
     String evidenceVersion = currentCommit(root) + ":" + sourceVersion;
-    Integer existing =
-        jdbc.queryForObject(
-            "select count(*) from knowledge_evidence e join knowledge_objects o on o.id=e.knowledge_object_id where e.client_id=? and o.knowledge_key=? and e.source_version=?",
-            Integer.class,
-            IMPORT_CLIENT,
-            key,
-            evidenceVersion);
-    if (existing > 0) return repository.findLatest(key).orElse(null);
+    if (ingestion.hasEvidence(key, evidenceVersion)) return ingestion.findLatest(key).orElse(null);
     KnowledgeObject object =
         service.create(
             new KnowledgeService.Draft(

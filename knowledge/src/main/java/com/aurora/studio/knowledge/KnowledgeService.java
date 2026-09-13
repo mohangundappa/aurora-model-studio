@@ -2,6 +2,7 @@ package com.aurora.studio.knowledge;
 
 import com.aurora.studio.common.ClientContext;
 import com.aurora.studio.common.KnowledgeType;
+import com.aurora.studio.common.RelationshipType;
 import com.aurora.studio.common.ValidationException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -325,6 +326,22 @@ public class KnowledgeService {
             evidenceId,
             excerpt,
             certainty));
+  }
+
+  @Transactional
+  public void link(UUID from, RelationshipType type, UUID to) {
+    require(from);
+    require(to);
+    repository.addRelationshipIfAbsent(from, type.name(), to, null);
+  }
+
+  public List<UUID> relatedObjectIds(UUID from, RelationshipType type) {
+    require(from);
+    return repository.relationships(from).stream()
+        .filter(relationship -> relationship.fromObjectId().equals(from))
+        .filter(relationship -> relationship.relationshipType() == type)
+        .map(KnowledgeRelationship::toObjectId)
+        .toList();
   }
 
   @Transactional

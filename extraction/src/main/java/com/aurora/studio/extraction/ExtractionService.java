@@ -9,8 +9,8 @@ import com.aurora.studio.gateway.LlmResult;
 import com.aurora.studio.gateway.RedactionPolicy;
 import com.aurora.studio.knowledge.FieldProvenance;
 import com.aurora.studio.knowledge.KnowledgeEvidence;
+import com.aurora.studio.knowledge.KnowledgeIngestion;
 import com.aurora.studio.knowledge.KnowledgeObject;
-import com.aurora.studio.knowledge.KnowledgeRepository;
 import com.aurora.studio.knowledge.KnowledgeService;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -68,14 +68,14 @@ public class ExtractionService {
   private final StructuralParser parser;
   private final LlmGateway gateway;
   private final KnowledgeService knowledge;
-  private final KnowledgeRepository repository;
+  private final KnowledgeIngestion repository;
   private final double interpretedCertainty;
 
   public ExtractionService(
       StructuralParser parser,
       LlmGateway gateway,
       KnowledgeService knowledge,
-      KnowledgeRepository repository,
+      KnowledgeIngestion repository,
       @Value("${studio.extraction.interpreted-certainty:0.72}") double interpretedCertainty) {
     this.parser = parser;
     this.gateway = gateway;
